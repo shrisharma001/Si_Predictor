@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Blast Furnace Si Predictor</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f5f5f5;
+            color: #222;
+        }
+
+        .container {
+            background: white;
+            padding: 35px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 25px 0;
+        }
+
+        .metric {
+            padding: 20px;
+            background: #f0f0f0;
+            border-radius: 8px;
+        }
+
+        .metric h3 {
+            margin: 0 0 10px;
+        }
+
+        .metric p {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 0;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 20px;
+            background: #222;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+        }
+
+        .button:hover {
+            background: #444;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Blast Furnace Silicon Predictor</h1>
+
+    <p class="subtitle">
+        XGBoost baseline model for Hot Metal Silicon (Si) prediction
+    </p>
+
+    <h2>Baseline Model</h2>
+
+    <div class="metrics">
+
+        <div class="metric">
+            <h3>Test MAE</h3>
+            <p>0.1194</p>
+        </div>
+
+        <div class="metric">
+            <h3>Test RMSE</h3>
+            <p>0.2219</p>
+        </div>
+
+        <div class="metric">
+            <h3>Test R²</h3>
+            <p>0.1373</p>
+        </div>
+
+    </div>
+
+    <h2>Model Information</h2>
+
+    <p>
+        Model: <strong>XGBoost Regressor</strong>
+    </p>
+
+    <p>
+        Input features: <strong>27</strong>
+    </p>
+
+    <p>
+        Target: <strong>Hot Metal Silicon (Si)</strong>
+    </p>
+
+    <br>
+
+    <a class="button" href="/predict">
+        Go to Prediction
+    </a>
+
+</div>
+
+</body>
+</html>

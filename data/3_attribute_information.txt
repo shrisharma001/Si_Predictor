@@ -1,0 +1,29 @@
+Fb	Blast flowrate, m3/min
+Ph	Hot blast pressure, kgf/cm2
+Pc	Cold blast pressure, kgf/cm2
+Tc	Cold-blast temperature,°C
+Fo	Blast oxygen flowrate, m3/h
+dP	Total gas pressure difference, kgf/cm2
+dPu	Upper gas pressure difference, kgf/cm2
+dPl	Lower gas pressure difference, kgf/cm2
+Pt	Top gas pressure, kgf/cm2
+Th	Hot-blast temperature,°C
+CO2	CO2 content of top gas, %
+H2	H2 content of top gas, %
+Tt1	Top gas temperature, °C
+Tt2	Top gas temperature, °C
+Tt3	Top gas temperature, °C
+Tt4	Top gas temperature, °C
+Tp1	Peripheral gas temperature, °C
+Tp2	Peripheral gas temperature, °C
+Tp3	Peripheral gas temperature, °C
+Tp4	Peripheral gas temperature, °C
+Tp5	Peripheral gas temperature, °C
+Tp6	Peripheral gas temperature, °C
+Tp7	Peripheral gas temperature, °C
+Tp8	Peripheral gas temperature, °C
+Tp9	Peripheral gas temperature, °C
+Tp10	Peripheral gas temperature, °C
+R	Ore-to-coke ratio
+Si	Si content in hot metal, %
+dt	date and time

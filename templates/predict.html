@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Si Prediction</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1100px;
+            margin: auto;
+            padding: 30px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 9px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .field {
+            margin-bottom: 15px;
+        }
+
+        button {
+            padding: 12px 25px;
+            background: #222;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        #result {
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 8px;
+            background: #eee;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Hot Metal Silicon Prediction</h1>
+
+    <p>Enter the 27 furnace parameters.</p>
+
+    <form id="predictionForm">
+
+        <div class="grid">
+
+            {% for feature in features %}
+
+            <div class="field">
+
+                <label for="{{ feature }}">
+                    {{ feature }}
+                </label>
+
+                <input
+                    type="number"
+                    step="any"
+                    id="{{ feature }}"
+                    name="{{ feature }}"
+                    required
+                >
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+        <br>
+
+        <button type="submit">
+            Predict Si
+        </button>
+
+    </form>
+
+    <div id="result"></div>
+
+</div>
+
+
+<script>
+
+document
+    .getElementById("predictionForm")
+    .addEventListener("submit", async function(event) {
+
+        event.preventDefault();
+
+        const formData = new FormData(this);
+
+        const data = {};
+
+        formData.forEach((value, key) => {
+            data[key] = parseFloat(value);
+        });
+
+        try {
+
+            const response = await fetch(
+                "/predict",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify(data)
+                }
+            );
+
+            const result =
+                await response.json();
+
+            const resultBox =
+                document.getElementById("result");
+
+            resultBox.style.display = "block";
+
+            if (result.error) {
+
+                resultBox.innerHTML =
+                    `<strong>Error:</strong> ${result.error}`;
+
+                return;
+            }
+
+            resultBox.innerHTML = `
+                <h2>Prediction</h2>
+
+                <p>
+                    Predicted Si:
+                    <strong>${result.prediction}</strong>
+                </p>
+
+                <p>
+                    Status:
+                    <strong>${result.status}</strong>
+                </p>
+            `;
+
+        } catch (error) {
+
+            document
+                .getElementById("result")
+                .style.display = "block";
+
+            document
+                .getElementById("result")
+                .innerHTML =
+                    `<strong>Error:</strong> ${error}`;
+
+        }
+
+    });
+
+</script>
+
+</body>
+</html>
