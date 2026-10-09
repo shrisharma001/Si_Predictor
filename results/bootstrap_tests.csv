@@ -1,0 +1,6 @@
+comparison (A vs B),MAE_A-MAE_B,CI95_low,CI95_high,significant
+ridge(F2+H) vs persistence,-0.0171,-0.0194,-0.0148,True
+xgb(F0+H) vs persistence,-0.0136,-0.0188,-0.0064,True
+ridge(F2+H) vs xgb(F0+H),-0.0034,-0.0105,0.0012,False
+sensors-only xgb(F1) vs mean,-0.0057,-0.0121,-0.0012,True
+sensors+history ridge vs sensors-only xgb,-0.026,-0.0519,-0.008,True
