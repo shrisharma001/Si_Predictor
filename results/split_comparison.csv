@@ -1,0 +1,16 @@
+model,setting,R2_mean,R2_std,MAE_mean,MAE_std,R2_normal_mean,R2_normal_std
+Sensors only - RF,random,0.5221,0.0576,0.0712,0.0003,0.2491,0.0104
+Sensors only - XGBoost,random,0.5299,0.0487,0.075,0.0006,0.1731,0.0101
+Sensors + prev Si - Ridge,random,0.6594,0.0352,0.0623,0.0008,0.3828,0.028
+Sensors only - RF,block 1 day,0.3847,0.1617,0.0766,0.0021,0.1518,0.0658
+Sensors only - XGBoost,block 1 day,0.3498,0.1607,0.0787,0.0016,0.1253,0.0427
+Sensors + prev Si - Ridge,block 1 day,0.6184,0.1246,0.0617,0.001,0.4039,0.0231
+Sensors only - RF,block 7 days,-0.1173,0.2515,0.0804,0.0051,0.0387,0.0956
+Sensors only - XGBoost,block 7 days,0.0748,0.1903,0.0782,0.0046,0.0856,0.0457
+Sensors + prev Si - Ridge,block 7 days,0.4126,0.1776,0.0633,0.0029,0.3372,0.0581
+Sensors only - RF,block 30 days,-0.0292,0.3918,0.0827,0.005,-0.1826,0.2347
+Sensors only - XGBoost,block 30 days,0.1876,0.2334,0.0791,0.0051,0.0532,0.0407
+Sensors + prev Si - Ridge,block 30 days,0.468,0.2195,0.064,0.0033,0.3136,0.0593
+Sensors only - RF,chronological,0.023,,0.0787,,0.0237,
+Sensors only - XGBoost,chronological,0.0353,,0.0776,,0.0431,
+Sensors + prev Si - Ridge,chronological,0.1536,,0.0706,,0.1182,

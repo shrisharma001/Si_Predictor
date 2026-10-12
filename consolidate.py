@@ -24,6 +24,10 @@ add("Sensors + prev Si - Ridge+XGB hybrid",(h["MAE_mean"],h["MAE_std"],h["R2_mea
 add("Sensors + prev Si - GRU (3 seeds)",(g["MAE"].mean(),g["MAE"].std(),g["R2"].mean(),g["within_0.10"].mean(),g["R2_normal"].mean()),
     (tg["MAE"][0],tg["R2"][0],tg["within_0.10"][0],tg["R2_normal"][0]))
 T=pd.DataFrame(rows).round(4); T.to_csv(R+"consolidated_results.csv",index=False); print(T.to_string(index=False))
+import os
+if os.path.exists(R+"gru_test_runs.csv"):
+    gr=pd.read_csv(R+"gru_test_runs.csv"); print(f"\nGRU test over {len(gr)} independent runs: MAE {gr.MAE.mean():.4f} +- {gr.MAE.std():.4f}, R2 {gr.R2.mean():.3f} +- {gr.R2.std():.3f}")
+    print("(GRU table row = mean over runs; the bootstrap below uses predictions averaged over runs)")
 pf=pd.read_csv(R+"cv_peaks_folds.csv").pivot(index="fold",columns="variant",values="MAE")
 print("\nper-fold MAE hybrid",pf["hybrid"].round(4).tolist()," gru",g.set_index("fold")["MAE"].round(4).tolist())
 a=pd.read_csv(R+"test_peaks_predictions.csv",parse_dates=["dt"]); b=pd.read_csv(R+"gru_test_predictions.csv",parse_dates=["dt"])

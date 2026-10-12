@@ -12,7 +12,7 @@ features, models, evaluation) that can later be served through a Flask UI.
   - sheet `Si`: 16,589 irregularly timed Si lab results
   - sheet `symbols`: variable descriptions
 - Source: *Process data collected by blast-furnace sensors*, Mendeley Data,
-  DOI 10.17632/6d7jbc7tb5.1. **TODO: confirm this matches the file used before citing.**
+  DOI 10.17632/6d7jbc7tb5.1.
 - Period: January 2013 to May 2016.
 
 ## Setup
@@ -32,7 +32,8 @@ mkdir -p data model results
 | `run_experiments.py` | Main protocol: time-series CV on the first 85 %, one-shot final test on the last 15 % |
 | `run_extra.py` | History-length sweep + MLP, Si-band classification, paired block-bootstrap tests, error analysis, figures |
 | `run_peaks.py` | Upset/peak experiments (early-warning features, log target, Ridge+XGBoost hybrid) |
-| `run_gru.py` | GRU baseline (TensorFlow) under the same protocol |
+| `run_split_comparison.py` | Shows how random / blocked / chronological splits change the reported accuracy (development period only) |
+| `run_gru.py` | GRU baseline (TensorFlow) under the same protocol; several independent runs, reports mean and spread |
 | `consolidate.py` | Builds `results/consolidated_results.csv` and the GRU significance tests |
 | `app.py`, `templates/` | Flask app (currently loads the older 27-feature model, not yet the new pipeline) |
 | `train_model.py`, `train_model_lag.py` | Earlier XGBoost baselines |
@@ -49,7 +50,8 @@ python run_extra.py --stage history
 python run_extra.py --stage classify
 python run_extra.py --stage analysis
 python run_peaks.py
-python run_gru.py          # needs tensorflow-cpu
+python run_split_comparison.py
+python run_gru.py          # needs tensorflow-cpu; 5 runs by default (30+ min); add --test-only for a quick check
 python consolidate.py
 ```
 
@@ -78,22 +80,25 @@ TensorFlow is not fully deterministic, so GRU numbers differ between runs and ma
 | Sensors + prev. Si, XGBoost | 0.074 | 0.27 | 0.086 | 0.62 | 0.727 |
 | Sensors + prev. Si, Ridge | 0.071 | 0.33 | 0.083 | 0.71 | 0.732 |
 | Sensors + prev. Si, Ridge+XGBoost hybrid | **0.069** | **0.38** | 0.081 | 0.72 | 0.734 |
-| Sensors + prev. Si, GRU (3 seeds, one run) | 0.074 | 0.06 | 0.081 | 0.70 | 0.742 |
+| Sensors + prev. Si, GRU (mean of 5 runs x 3 seeds) | 0.079 | -0.17 | 0.082 | 0.68 | 0.739 |
 
-Full table: `results/consolidated_results.csv`. The GRU row is from one run on the author's machine;
-an earlier run elsewhere gave test MAE 0.079 and R² 0.72, so the GRU and the hybrid are effectively tied on test.
+Full table: `results/consolidated_results.csv`. The GRU row is the mean of 5 independent runs
+(test MAE 0.0823 +- 0.0009, R2 0.684 +- 0.009; CV R2 varies from -0.77 to 0.17 between runs).
 
 ## Findings and caveats
 
 - Sensors alone have almost no forward-looking skill on time-split data.
 - The previous Si lab results are the key input; more than 3 add almost nothing.
+- The split method matters more than the model: for sensors-only Random Forest, R² is 0.52 with a random split,
+  0.38 / -0.12 / -0.03 with 1-day / 7-day / 30-day blocks, and 0.02 with a chronological split (development period only).
+  MAE moves much less (0.071 to 0.079), so R² on shuffled splits is the most misleading number.
 - Models beat persistence significantly (paired block bootstrap), mainly in normal operation.
 - All models underestimate the large upsets (Si > 1.2, about 2 % of samples). Test R² is strongly
   affected by the Jan-Feb 2016 upsets, so also look at the "normal-range" metrics.
 - Ridge vs XGBoost and hybrid vs Ridge differences are not statistically significant on the test set.
-- The GRU is unstable in CV (one fold R² of -0.96) and, on the test set, roughly tied with the hybrid
-  (test MAE 0.079 to 0.081 across two runs, vs 0.081). Do not claim it is better; treat it as a comparator.
-  For the paper, report the mean over several runs rather than a single run.
+- The GRU is unstable in CV (mean R2 -0.17 over 5 runs; one fold is about -1) and, on the test set, is
+  statistically tied with the hybrid (0.0823 vs 0.0812, 95 % CI of the difference -0.0022 to +0.0026).
+  The hybrid has lower CV MAE in every fold, so it is the primary model; the GRU is a comparator.
 - "Normal-range" metrics select samples by true Si (0.2 to 1.2).
 - The test set was used twice in total (main configurations, then peak and GRU experiments),
   plus once for the band-classification analysis. Re-running the GRU repeatedly to find a better test
@@ -112,7 +117,8 @@ an earlier run elsewhere gave test MAE 0.079 and R² 0.72, so the GRU and the hy
 | `bootstrap_tests.csv`, `error_by_regime.csv` | `--stage analysis` | Paired block-bootstrap tests and error by Si regime |
 | `fig_test_timeseries.png`, `fig_scatter.png`, `fig_cv_mae.png` | `--stage analysis` / `consolidate.py` | Paper figures (300 dpi) |
 | `cv_peaks_folds.csv`, `cv_peaks_summary.csv`, `test_peaks_results.csv`, `test_peaks_predictions.csv` | `run_peaks.py` | Early-warning features, log target, hybrid |
-| `gru_cv_folds.csv`, `gru_test_results.csv`, `gru_test_predictions.csv` | `run_gru.py` | GRU baseline |
+| `gru_cv_folds.csv`, `gru_test_results.csv`, `gru_test_predictions.csv`, `gru_test_runs.csv`, `gru_cv_runs.csv` | `run_gru.py` | GRU baseline (means over runs, plus per-run values) |
+| `split_comparison.csv`, `split_comparison_runs.csv`, `fig_split_leakage.png` | `run_split_comparison.py` | Accuracy under random, blocked and chronological splits |
 | `consolidated_results.csv` | `consolidate.py` | Final comparison table across all models |
 
 ## What to commit
