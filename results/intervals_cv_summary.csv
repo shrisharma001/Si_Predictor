@@ -1,0 +1,4 @@
+method,coverage_mean,coverage_std,width_mean,width_std,interval_score_mean,interval_score_std,cov_normal_mean,cov_normal_std,cov_upset_mean,cov_upset_std,cov_long_gap_mean,cov_long_gap_std
+conformal,0.883,0.072,0.285,0.086,0.493,0.199,0.887,0.064,0.011,0.016,0.743,0.214
+cqr,0.882,0.059,0.304,0.098,0.577,0.353,0.887,0.052,0.0,0.0,0.809,0.122
+mondrian,0.876,0.064,0.278,0.073,0.491,0.196,0.88,0.056,0.011,0.016,0.743,0.214

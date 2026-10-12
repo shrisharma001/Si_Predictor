@@ -1,0 +1,5 @@
+score,average_precision,recall_at_5pct_false_alarms,n_onsets_in_cv,verdict
+classifier,0.027,1.0,1,NOT EVALUABLE: too few upset onsets (need >= 10 independent events)
+hybrid_pred,0.333,1.0,1,NOT EVALUABLE: too few upset onsets (need >= 10 independent events)
+persistence,0.001,0.0,1,NOT EVALUABLE: too few upset onsets (need >= 10 independent events)
+(random guess: AP = base rate),0.0002,0.05,1,NOT EVALUABLE: too few upset onsets (need >= 10 independent events)

@@ -16,8 +16,8 @@ def add_domain(feats, c, rolling):
     f["dPu_share"] = c.dPu / (c.dP.abs() + 0.05)
     f["blast_dp"] = (c.Ph - c.Pt) / fb ** 2
     tp = c[[f"Tp{i}" for i in range(1, 11)]]; tt = c[[f"Tt{i}" for i in range(1, 5)]]
-    f["Tp_mean"], f["Tp_std"], f["Tp_max"], f["Tp_min"] = tp.mean(1), tp.std(1), tp.max(1), tp.min(1)
-    f["Tt_mean"], f["Tt_spread"] = tt.mean(1), tt.max(1) - tt.min(1)
+    f["Tp_mean"], f["Tp_std"], f["Tp_max"], f["Tp_min"] = tp.mean(axis=1), tp.std(axis=1), tp.max(axis=1), tp.min(axis=1)
+    f["Tt_mean"], f["Tt_spread"] = tt.mean(axis=1), tt.max(axis=1) - tt.min(axis=1)
     f["Tp_minus_Tt"] = f["Tp_mean"] - f["Tt_mean"]
     if rolling:
         for b in ["o2_frac", "perm_idx", "Tp_mean", "Tp_std", "Tt_mean", "Tp_minus_Tt"]:

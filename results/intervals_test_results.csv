@@ -1,0 +1,4 @@
+method,coverage,width,interval_score,cov_normal,cov_upset,n_upset,cov_long_gap,n_long_gap,n
+conformal,0.868,0.293,0.575,0.881,0.191,47,0.725,255,2484
+mondrian,0.862,0.286,0.58,0.875,0.191,47,0.714,255,2484
+cqr,0.865,0.31,0.535,0.872,0.511,47,0.816,255,2484

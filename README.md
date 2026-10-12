@@ -32,6 +32,11 @@ mkdir -p data model results
 | `run_experiments.py` | Main protocol: time-series CV on the first 85 %, one-shot final test on the last 15 % |
 | `run_extra.py` | History-length sweep + MLP, Si-band classification, paired block-bootstrap tests, error analysis, figures |
 | `run_peaks.py` | Upset/peak experiments (early-warning features, log target, Ridge+XGBoost hybrid) |
+| `run_uncertainty.py` | 90 % prediction intervals (conformal, Mondrian, CQR) with CV and one-shot test; exploratory upset early warning (too few events to evaluate) |
+| `run_learning_curve.py` | MAE vs amount of recent training data |
+| `run_thermal.py` | CV-only test of hot-blast-temperature (`Th`) based thermal-state features; no gain |
+| `run_domain.py` | CV-only test of process-knowledge features (oxygen share, permeability index, temperature-profile summaries); no gain |
+| `run_ideas.py`, `run_ideas2.py` | CV-only tests of further ideas (state-change features, delta target, slow features, sliding window, error feedback, blend); none beat the hybrid |
 | `run_split_comparison.py` | Shows how random / blocked / chronological splits change the reported accuracy (development period only) |
 | `run_gru.py` | GRU baseline (TensorFlow) under the same protocol; several independent runs, reports mean and spread |
 | `consolidate.py` | Builds `results/consolidated_results.csv` and the GRU significance tests |
@@ -92,6 +97,11 @@ Full table: `results/consolidated_results.csv`. The GRU row is the mean of 5 ind
 - The split method matters more than the model: for sensors-only Random Forest, R² is 0.52 with a random split,
   0.38 / -0.12 / -0.03 with 1-day / 7-day / 30-day blocks, and 0.02 with a chronological split (development period only).
   MAE moves much less (0.071 to 0.079), so R² on shuffled splits is the most misleading number.
+- Nominal 90 % intervals cover 88 % in CV and 86-87 % on the test set, with width about 0.29 (about +-0.14 Si). Coverage is
+  about 88 % in normal operation but poor in upsets (1 % CV, 19 % test for conformal; CQR reaches 51 % on test), and low
+  after long gaps between lab results (0.74 to 0.82).
+- Learning curve: MAE keeps falling with more training data (0.075 at 2,000 samples to 0.067 at 10,000, no plateau).
+- Upset early warning cannot be evaluated: the whole series contains only 8 upset onsets (3 development, 5 test).
 - Models beat persistence significantly (paired block bootstrap), mainly in normal operation.
 - All models underestimate the large upsets (Si > 1.2, about 2 % of samples). Test R² is strongly
   affected by the Jan-Feb 2016 upsets, so also look at the "normal-range" metrics.
@@ -104,6 +114,7 @@ Full table: `results/consolidated_results.csv`. The GRU row is the mean of 5 ind
   plus once for the band-classification analysis. Re-running the GRU repeatedly to find a better test
   number would be test-set tuning: fix the number of runs in advance and report their mean.
 - Results are for a single furnace; different furnaces need their own trained model.
+- `2_blast_furnace_data_second_dataset.xlsx` is a labelled excerpt (200 hours, 127 Si samples, 8 furnace states of 25 hours each) of the first dataset, not a second furnace and not extra training data.
 
 ## Files in `results/`
 
@@ -118,6 +129,11 @@ Full table: `results/consolidated_results.csv`. The GRU row is the mean of 5 ind
 | `fig_test_timeseries.png`, `fig_scatter.png`, `fig_cv_mae.png` | `--stage analysis` / `consolidate.py` | Paper figures (300 dpi) |
 | `cv_peaks_folds.csv`, `cv_peaks_summary.csv`, `test_peaks_results.csv`, `test_peaks_predictions.csv` | `run_peaks.py` | Early-warning features, log target, hybrid |
 | `gru_cv_folds.csv`, `gru_test_results.csv`, `gru_test_predictions.csv`, `gru_test_runs.csv`, `gru_cv_runs.csv` | `run_gru.py` | GRU baseline (means over runs, plus per-run values) |
+| `intervals_cv_*.csv`, `intervals_test_*.csv`, `early_warning_cv.csv`, `fig_intervals_test.png` | `run_uncertainty.py` | Prediction-interval coverage/width and the (non-evaluable) early-warning check |
+| `learning_curve_*.csv`, `fig_learning_curve.png` | `run_learning_curve.py` | MAE vs training size |
+| `thermal_cv_*.csv` | `run_thermal.py` | Th-based features (negative result) |
+| `domain_cv_*.csv` | `run_domain.py` | CV results of the domain features (negative result) |
+| `ideas_cv_*.csv`, `ideas2_cv_*.csv` | `run_ideas*.py` | CV results of the further ideas (negative results) |
 | `split_comparison.csv`, `split_comparison_runs.csv`, `fig_split_leakage.png` | `run_split_comparison.py` | Accuracy under random, blocked and chronological splits |
 | `consolidated_results.csv` | `consolidate.py` | Final comparison table across all models |
 
