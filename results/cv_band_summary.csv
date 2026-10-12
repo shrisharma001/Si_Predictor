@@ -1,0 +1,6 @@
+model,macro_F1_mean,macro_F1_std,bal_acc_mean,bal_acc_std,acc_mean,acc_std,recall_low_mean,recall_low_std,recall_high_mean,recall_high_std
+majority,0.22,0.032,0.333,0.0,0.499,0.103,0.0,0.0,0.0,0.0
+persistence,0.564,0.085,0.564,0.085,0.599,0.057,0.566,0.124,0.504,0.181
+ridge (regress->band),0.568,0.065,0.559,0.066,0.609,0.027,0.498,0.09,0.464,0.15
+xgb_classifier,0.54,0.058,0.575,0.055,0.555,0.057,0.678,0.083,0.612,0.154
+xgb_l2 (regress->band),0.542,0.09,0.536,0.094,0.611,0.024,0.446,0.165,0.413,0.229

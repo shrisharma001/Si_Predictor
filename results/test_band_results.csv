@@ -1,0 +1,6 @@
+model,macro_F1,bal_acc,acc,recall_low,recall_high
+majority,0.225,0.333,0.508,0.0,0.0
+persistence,0.491,0.491,0.511,0.475,0.433
+ridge (regress->band),0.513,0.503,0.546,0.405,0.435
+xgb_l2 (regress->band),0.465,0.461,0.558,0.191,0.35
+xgb_classifier,0.513,0.522,0.524,0.587,0.456
