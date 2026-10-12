@@ -12,7 +12,7 @@ features, models, evaluation) that can later be served through a Flask UI.
   - sheet `Si`: 16,589 irregularly timed Si lab results
   - sheet `symbols`: variable descriptions
 - Source: *Process data collected by blast-furnace sensors*, Mendeley Data,
-  DOI 10.17632/6d7jbc7tb5.1.
+  DOI 10.17632/6d7jbc7tb5.1. **TODO: confirm this matches the file used before citing.**
 - Period: January 2013 to May 2016.
 
 ## Setup
@@ -53,8 +53,9 @@ python run_gru.py          # needs tensorflow-cpu
 python consolidate.py
 ```
 
-Results land in `results/`. Seeds are fixed, so numbers should reproduce (GRU may differ slightly
-across TensorFlow versions).
+Results land in `results/`. Seeds are fixed, so every model except the GRU reproduces exactly
+(a second machine reproduced the Ridge, XGBoost and hybrid numbers to all printed digits).
+TensorFlow is not fully deterministic, so GRU numbers differ between runs and machines; see below.
 
 ## Evaluation protocol
 
@@ -77,9 +78,10 @@ across TensorFlow versions).
 | Sensors + prev. Si, XGBoost | 0.074 | 0.27 | 0.086 | 0.62 | 0.727 |
 | Sensors + prev. Si, Ridge | 0.071 | 0.33 | 0.083 | 0.71 | 0.732 |
 | Sensors + prev. Si, Ridge+XGBoost hybrid | **0.069** | **0.38** | 0.081 | 0.72 | 0.734 |
-| Sensors + prev. Si, GRU (3 seeds) | 0.074 | 0.07 | **0.079** | 0.72 | **0.756** |
+| Sensors + prev. Si, GRU (3 seeds, one run) | 0.074 | 0.06 | 0.081 | 0.70 | 0.742 |
 
-Full table: `results/consolidated_results.csv`.
+Full table: `results/consolidated_results.csv`. The GRU row is from one run on the author's machine;
+an earlier run elsewhere gave test MAE 0.079 and R² 0.72, so the GRU and the hybrid are effectively tied on test.
 
 ## Findings and caveats
 
@@ -89,9 +91,31 @@ Full table: `results/consolidated_results.csv`.
 - All models underestimate the large upsets (Si > 1.2, about 2 % of samples). Test R² is strongly
   affected by the Jan-Feb 2016 upsets, so also look at the "normal-range" metrics.
 - Ridge vs XGBoost and hybrid vs Ridge differences are not statistically significant on the test set.
-- The GRU is unstable in CV (one fold R² of -0.96) but best on the test set; treat as a comparator.
+- The GRU is unstable in CV (one fold R² of -0.96) and, on the test set, roughly tied with the hybrid
+  (test MAE 0.079 to 0.081 across two runs, vs 0.081). Do not claim it is better; treat it as a comparator.
+  For the paper, report the mean over several runs rather than a single run.
 - "Normal-range" metrics select samples by true Si (0.2 to 1.2).
 - The test set was used twice in total (main configurations, then peak and GRU experiments),
-  plus once for the band-classification analysis.
+  plus once for the band-classification analysis. Re-running the GRU repeatedly to find a better test
+  number would be test-set tuning: fix the number of runs in advance and report their mean.
 - Results are for a single furnace; different furnaces need their own trained model.
 
+## Files in `results/`
+
+| File | Written by | Content |
+|---|---|---|
+| `cv_fold_results.csv`, `cv_summary.csv` | `run_experiments.py --stage cv` | CV metrics per fold, and mean/std per feature set and model |
+| `final_test_results.csv`, `final_test_predictions.csv` | `--stage final` | One-shot test metrics and predictions for the pre-specified configurations |
+| `importance_*.csv` | `--stage final` | XGBoost feature importances (`F0HH` means `F0+H`: the `+` is replaced by `H` in file names) |
+| `cv_history_folds.csv`, `cv_history_summary.csv` | `run_extra.py --stage history` | Number of previous Si results (1, 3, 5, 10) and the MLP baseline |
+| `cv_band_summary.csv`, `test_band_results.csv` | `--stage classify` | Low / normal / high Si-band classification |
+| `bootstrap_tests.csv`, `error_by_regime.csv` | `--stage analysis` | Paired block-bootstrap tests and error by Si regime |
+| `fig_test_timeseries.png`, `fig_scatter.png`, `fig_cv_mae.png` | `--stage analysis` / `consolidate.py` | Paper figures (300 dpi) |
+| `cv_peaks_folds.csv`, `cv_peaks_summary.csv`, `test_peaks_results.csv`, `test_peaks_predictions.csv` | `run_peaks.py` | Early-warning features, log target, hybrid |
+| `gru_cv_folds.csv`, `gru_test_results.csv`, `gru_test_predictions.csv` | `run_gru.py` | GRU baseline |
+| `consolidated_results.csv` | `consolidate.py` | Final comparison table across all models |
+
+## What to commit
+
+Commit the `.py` files, `templates/`, `requirements.txt`, `README.md`, and the small `results/`
+CSVs and `fig_*.png`. Do not commit `data/`, `model/*.pkl`, `venv/` or `__pycache__/`.
