@@ -126,10 +126,11 @@ Full table: `results/consolidated_results.csv`. The GRU row is the mean of 5 ind
 | `cv_history_folds.csv`, `cv_history_summary.csv` | `run_extra.py --stage history` | Number of previous Si results (1, 3, 5, 10) and the MLP baseline |
 | `cv_band_summary.csv`, `test_band_results.csv` | `--stage classify` | Low / normal / high Si-band classification |
 | `bootstrap_tests.csv`, `error_by_regime.csv` | `--stage analysis` | Paired block-bootstrap tests and error by Si regime |
-| `fig_test_timeseries.png`, `fig_scatter.png`, `fig_cv_mae.png` | `--stage analysis` / `consolidate.py` | Paper figures (300 dpi) |
+| `fig_test_timeseries.png`, `fig_scatter.png` | `run_extra.py --stage analysis` | Paper figures (300 dpi) |
+| `fig_cv_mae.png` | `consolidate.py` | MAE of all 7 models, CV and test (`run_extra.py` writes an older 5-bar version first; `consolidate.py` overwrites it, so keep the run order) |
 | `cv_peaks_folds.csv`, `cv_peaks_summary.csv`, `test_peaks_results.csv`, `test_peaks_predictions.csv` | `run_peaks.py` | Early-warning features, log target, hybrid |
 | `gru_cv_folds.csv`, `gru_test_results.csv`, `gru_test_predictions.csv`, `gru_test_runs.csv`, `gru_cv_runs.csv` | `run_gru.py` | GRU baseline (means over runs, plus per-run values) |
-| `intervals_cv_*.csv`, `intervals_test_*.csv`, `early_warning_cv.csv`, `fig_intervals_test.png` | `run_uncertainty.py` | Prediction-interval coverage/width and the (non-evaluable) early-warning check |
+| `intervals_cv_*.csv`, `intervals_test_*.csv`, `early_warning_cv.csv`, `fig_intervals_test.png` | `run_uncertainty.py` (`--figure-only` redraws the figure from saved predictions) | Prediction-interval coverage/width and the (non-evaluable) early-warning check |
 | `learning_curve_*.csv`, `fig_learning_curve.png` | `run_learning_curve.py` | MAE vs training size |
 | `thermal_cv_*.csv` | `run_thermal.py` | Th-based features (negative result) |
 | `domain_cv_*.csv` | `run_domain.py` | CV results of the domain features (negative result) |

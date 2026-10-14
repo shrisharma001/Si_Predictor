@@ -35,3 +35,25 @@ assert (a.dt.values==b.dt.values).all(); y=a.Si.values
 for n2,p2 in [("hybrid",a.hybrid),("persistence",a.persistence),("xgb_ref",a.xgb_ref)]:
     d,lo,hi=block_bootstrap_diff(np.abs(y-b.gru),np.abs(y-p2)); print(f"gru vs {n2}: dMAE={d:.4f} CI=({lo:.4f},{hi:.4f})","SIG" if not lo<=0<=hi else "n.s.")
 m=y>1.2; print("GRU MAE on upsets (>1.2):", round(float(np.abs(y[m]-b.gru[m]).mean()),3))
+
+
+# ---------------- figure: CV and test MAE of all models (overwrites the older 5-bar version) ----------------
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+labels = ["Mean", "Sensors only\n(XGBoost)", "Persistence", "Sensors+prev Si\n(XGBoost)", "Sensors+prev Si\n(Ridge)",
+          "Sensors+prev Si\n(Ridge+XGB)", "Sensors+prev Si\n(GRU)"]
+colors = ["gray", "tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown"]
+plt.rcParams.update({"font.size": 8, "font.family": "serif"})
+fig, ax = plt.subplots(1, 2, figsize=(7.4, 3.3))
+ax[0].bar(range(len(T)), T.CV_MAE, yerr=T.CV_MAE_std, capsize=3, color=colors)
+ax[0].set_title("(a) Time-series CV (mean ± std, 5 folds)")
+ax[1].bar(range(len(T)), T.Test_MAE, color=colors)
+ax[1].set_title("(b) Held-out test period")
+for a in ax:
+    a.set_xticks(range(len(T)))
+    a.set_xticklabels(labels, fontsize=6, rotation=60, ha="right")
+    a.set_ylabel("MAE (wt% Si)")
+fig.tight_layout()
+fig.savefig(R + "fig_cv_mae.png", dpi=300)
+print("saved fig_cv_mae.png")

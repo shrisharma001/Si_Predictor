@@ -13,6 +13,7 @@ PART 2  Early warning of upsets (Si > 1.2 at the next cast), evaluated where the
   used as an alarm score.  The number of upset episodes is very small, so treat this part as exploratory.
 
   python run_uncertainty.py
+  python run_uncertainty.py --figure-only      # only redraw fig_intervals_test.png from saved predictions
 """
 import time
 
@@ -114,6 +115,39 @@ def event_scores(tr, va, cols, p_va):
                          "hybrid_pred": p_va[keep], "persistence": va["si_prev1"].values[keep]})
 
 
+def make_interval_figure(pr=None):
+    """Paper figure: (a) a normal week with the 90 % intervals, (b) the largest upset, where they fail."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
+    if pr is None:
+        pr = pd.read_csv(f"{OUT_DIR}/intervals_test_predictions.csv", parse_dates=["dt"])
+    plt.rcParams.update({"font.size": 8, "font.family": "serif"})
+    big = pr.loc[pr.Si.idxmax(), "dt"]
+    start = big + pd.Timedelta(days=57)                      # a calm stretch well after the upset
+    w1 = (pr.dt >= start) & (pr.dt < start + pd.Timedelta(days=7))
+    w2 = (pr.dt >= big - pd.Timedelta(days=8)) & (pr.dt <= big + pd.Timedelta(days=6))
+    fig, ax = plt.subplots(2, 1, figsize=(7.2, 5.0))
+    panels = [(ax[0], w1, "(a) Normal operation: 90 % intervals", 1),
+              (ax[1], w2, "(b) Around the largest upset: the intervals do not cover the peaks", 2)]
+    for a, w, title, step in panels:
+        q = pr[w]
+        a.fill_between(q.dt, q.cqr_lo, q.cqr_hi, color="tab:orange", alpha=0.25, label="CQR 90 % interval")
+        a.fill_between(q.dt, q.conformal_lo, q.conformal_hi, color="tab:blue", alpha=0.25, label="Conformal 90 % interval")
+        a.plot(q.dt, q.Si, "k.-", lw=0.6, ms=3, label="Measured Si")
+        a.plot(q.dt, q.pred, color="tab:red", lw=0.8, label="Hybrid prediction")
+        a.set_ylabel("Si (wt%)")
+        a.set_title(title)
+        a.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+        a.xaxis.set_major_locator(mdates.DayLocator(interval=step))
+    ax[0].legend(ncol=4, fontsize=6.5, frameon=False, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(f"{OUT_DIR}/fig_intervals_test.png", dpi=300)
+    plt.close(fig)
+    print("saved fig_intervals_test.png")
+
+
 def main():
     _, raw, si, samples = load_universe()
     n = len(samples)
@@ -166,6 +200,7 @@ def main():
     for meth, (lo, hi) in iv.items():
         pr[f"{meth}_lo"], pr[f"{meth}_hi"] = lo, hi
     pr.to_csv(f"{OUT_DIR}/intervals_test_predictions.csv", index=False)
+    make_interval_figure(pr)
 
     # ---- early warning (exploratory) ----
     if ev_parts:
@@ -188,4 +223,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--figure-only" in sys.argv:          # re-draw the figure from results/intervals_test_predictions.csv
+        make_interval_figure()
+    else:
+        main()
