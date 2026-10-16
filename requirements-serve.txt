@@ -1,0 +1,12 @@
+# Minimum packages to SERVE the saved pipeline (no experiments, no TensorFlow, no plotting)
+Flask>=2.3
+gunicorn>=21.2
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.3
+xgboost>=2.0
+joblib>=1.3
+# The saved model is a pickle tied to the scikit-learn / xgboost versions that created it.
+# Best practice: in the virtual environment where you ran `python train_final.py`, run
+#   pip freeze > requirements-lock.txt
+# and install exactly that file wherever the API is deployed.

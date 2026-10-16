@@ -1,0 +1,33 @@
+fact,value,note
+sensor_rows,29602,hourly rows in sheet 'data'
+sensor_variables,27,process variables used
+sensor_start,2013-01-01 00:00:00,
+sensor_end,2016-05-18 09:00:00,
+sensor_step_hours_most_common,1.0,
+sensor_gaps_over_1h,0,
+si_rows_raw,16589,rows in sheet 'Si'
+si_rows_valid_positive,16573,after removing missing and Si <= 0
+si_removed_nonpositive_or_missing,16,
+si_gap_hours_q10,1.25,
+si_gap_hours_q25,1.42,
+si_gap_hours_q50,1.65,
+si_gap_hours_q75,1.92,
+si_gap_hours_q90,2.17,
+si_gap_hours_q99,4.19,
+si_mean,0.4907,
+si_std,0.1646,
+si_min,0.01,
+si_max,4.32,
+si_above_1.2_total,94,
+samples_after_warmup_and_history,16559,common row universe for all experiments
+dev_samples,14075,
+dev_start,2013-01-02 00:30:00,
+dev_end,2015-10-11 17:35:00,
+test_samples,2484,
+test_start,2015-10-11 19:20:00,
+test_end,2016-05-11 08:50:00,
+test_samples_si_above_1.2,47,
+dev_samples_si_above_1.2,47,
+upset_onsets_total,8,first result above 1.2 right after a result <= 1.0
+upset_onsets_dev,3,
+upset_onsets_test,5,

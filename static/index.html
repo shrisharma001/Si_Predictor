@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hot-metal silicon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&display=swap">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <h1>Hot-metal silicon</h1>
+      <p id="model-line" class="model-line">Loading the model…</p>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="mode-switch" role="tablist" aria-label="Data source">
+      <button role="tab" id="tab-replay" aria-selected="true" aria-controls="panel-replay">Replay held-out casts</button>
+      <button role="tab" id="tab-files" aria-selected="false" aria-controls="panel-files" tabindex="-1">Predict from my files</button>
+    </div>
+
+    <section id="panel-replay" role="tabpanel" aria-labelledby="tab-replay" class="controls">
+      <p class="lede">Replays casts the demo model never saw: it was trained only on data up to <span id="held-from">October 2015</span>,
+        and each prediction uses only what was known before that cast.</p>
+      <form id="replay-form" class="control-row">
+        <label>Period
+          <select id="replay-preset"></select>
+        </label>
+        <label>Start
+          <input type="datetime-local" id="replay-start" step="60" required>
+        </label>
+        <label>Casts
+          <input type="number" id="replay-casts" min="1" max="200" value="48" required>
+        </label>
+        <button type="submit" class="primary" id="replay-go">Play replay</button>
+        <button type="button" id="replay-skip" disabled>Show all now</button>
+      </form>
+      <p id="replay-unavailable" class="notice" hidden></p>
+    </section>
+
+    <section id="panel-files" role="tabpanel" aria-labelledby="tab-files" class="controls" hidden>
+      <p class="lede">Use your own readings. The sensor file needs a <code>dt</code> column and the 27 process variables
+        (<span id="sensor-cols">Fb, Ph, Pc, …</span>), with at least 24 hourly rows before the chosen time.
+        The Si file needs <code>dt</code> and <code>Si</code>, with at least 3 results before that time. CSV or Excel.</p>
+      <form id="files-form" class="control-row">
+        <label>Sensor readings
+          <input type="file" id="sensor-file" accept=".csv,.xlsx,.xlsm" required>
+        </label>
+        <label>Si lab results
+          <input type="file" id="si-file" accept=".csv,.xlsx,.xlsm" required>
+        </label>
+        <label>Cast time (optional)
+          <input type="datetime-local" id="files-time" step="60" aria-describedby="files-time-help">
+          <span id="files-time-help" class="hint">Blank means the latest sensor reading</span>
+        </label>
+        <button type="submit" class="primary" id="files-go">Predict next cast</button>
+      </form>
+    </section>
+
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <section class="readout" aria-labelledby="readout-title" aria-live="polite">
+      <div class="reading">
+        <h2 id="readout-title" class="reading-title">Predicted silicon</h2>
+        <p class="reading-value"><span id="pred-value">–</span><span class="unit">wt% Si</span></p>
+        <p id="pred-when" class="reading-when">Run a replay or upload files to see a prediction.</p>
+      </div>
+      <div class="gauge-wrap">
+        <svg id="gauge" class="gauge" role="img" aria-label="Prediction interval against the typical range"></svg>
+        <p id="gauge-caption" class="gauge-caption"></p>
+      </div>
+      <div class="status">
+        <p id="status-line" class="status-line" data-status="idle">
+          <svg class="status-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/></svg>
+          <span id="status-text">Waiting for data</span>
+        </p>
+        <ul id="messages" class="messages"></ul>
+      </div>
+    </section>
+
+    <section class="recorder" aria-labelledby="chart-title">
+      <div class="recorder-head">
+        <h2 id="chart-title">Silicon by cast</h2>
+        <ul class="legend" aria-label="Legend">
+          <li><svg viewBox="0 0 24 8" aria-hidden="true"><line x1="0" y1="4" x2="24" y2="4" class="pen-measured"/></svg>Measured</li>
+          <li><svg viewBox="0 0 24 8" aria-hidden="true"><line x1="0" y1="4" x2="24" y2="4" class="pen-predicted"/></svg>Predicted</li>
+          <li><svg viewBox="0 0 24 8" aria-hidden="true"><rect x="0" y="0" width="24" height="8" class="band-swatch"/></svg>90 % interval</li>
+          <li><svg viewBox="0 0 24 8" aria-hidden="true"><rect x="0" y="0" width="24" height="8" class="typical-swatch"/></svg>Typical range (middle 80 % of past casts)</li>
+        </ul>
+      </div>
+      <div class="chart-paper">
+        <svg id="chart" class="chart" role="img" aria-label="Measured and predicted silicon by cast"></svg>
+        <div id="tooltip" class="tooltip" hidden></div>
+        <p id="chart-empty" class="chart-empty">The trace appears here.</p>
+      </div>
+      <p id="running" class="running"></p>
+      <details class="table-view">
+        <summary>Show the numbers</summary>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th scope="col">Cast time</th><th scope="col">Measured</th><th scope="col">Predicted</th><th scope="col">90 % interval</th><th scope="col">Status</th></tr></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <footer class="limits">
+      <h2>Before you rely on a prediction</h2>
+      <p>The model was trained on one furnace. Predictions follow the previous lab results closely and underestimate upsets:
+        when silicon rises above about 1.2 wt% the interval usually misses. Intervals are also less reliable when the last lab
+        result is more than a few hours old. Use the prediction as a guide next to the lab result, not as a control setpoint.</p>
+      <p><a href="/console">Developer console</a> for the raw API.</p>
+    </footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

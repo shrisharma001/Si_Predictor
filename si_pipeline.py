@@ -17,6 +17,8 @@ Stages
 """
 from __future__ import annotations
 
+__version__ = "1.3"   # 1.3: hybrid model, conformal intervals, predict_frame (needed by train_final, app, tests)
+
 from dataclasses import dataclass, field
 
 import joblib
@@ -29,6 +31,15 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
+
+def require_version(minimum):
+    """Stop with a clear message if this file is older than the calling script needs."""
+    have = tuple(int(x) for x in __version__.split("."))
+    need = tuple(int(x) for x in minimum.split("."))
+    if have < need:
+        raise SystemExit(f"si_pipeline.py is version {__version__} but this script needs {minimum} or newer. "
+                         "Copy the latest si_pipeline.py from the project folder over yours.")
+
 
 # ----------------------------------------------------------------------------
 # CONFIG
@@ -232,6 +243,25 @@ def assemble(sensor_feats, samples, si_all, cfg, use_history):
     return m.dropna().reset_index(drop=True)
 
 
+def conformal_quantile(scores, alpha):
+    """Finite-sample split-conformal quantile of the calibration scores."""
+    sc = np.sort(np.asarray(scores, float))
+    k = min(int(np.ceil((len(sc) + 1) * (1 - alpha))), len(sc))
+    return float(sc[k - 1])
+
+
+def assemble_keep(sensor_feats, queries, si_all, cfg, use_history):
+    """Like assemble(), but never drops a row: missing inputs stay NaN so the caller can explain why."""
+    left = queries[[cfg.time_col, cfg.target]].sort_values(cfg.time_col)
+    right = sensor_feats.reset_index().rename(columns={sensor_feats.index.name or "index": cfg.time_col})
+    m = pd.merge_asof(left, right, on=cfg.time_col, direction="backward",
+                      tolerance=pd.Timedelta(hours=cfg.align_tolerance_hours))
+    if use_history:
+        h = history_features(m[cfg.time_col], si_all[cfg.time_col], si_all[cfg.target].values, cfg.n_history)
+        m = pd.concat([m.reset_index(drop=True), h], axis=1)
+    return m
+
+
 # ----------------------------------------------------------------------------
 # 4. MODELS
 # ----------------------------------------------------------------------------
@@ -273,7 +303,22 @@ class XGBEarlyStop:
         return self.model_.predict(X)
 
 
-MODEL_NAMES = ["mean", "persistence", "ridge", "rf", "xgb_l2", "xgb_huber"]
+class HybridModel:
+    """Primary model: Ridge, then XGBoost fitted to the Ridge residuals (same recipe as run_peaks.Hybrid)."""
+    def __init__(self, seed=42):
+        self.lin = make_pipeline(StandardScaler(), Ridge(alpha=10.0))
+        self.res = XGBEarlyStop("reg:squarederror", seed=seed)
+
+    def fit(self, X, y):
+        self.lin.fit(X, y)
+        self.res.fit(X, y - self.lin.predict(X))
+        return self
+
+    def predict(self, X):
+        return self.lin.predict(X) + self.res.predict(X)
+
+
+MODEL_NAMES = ["mean", "persistence", "ridge", "rf", "xgb_l2", "xgb_huber", "hybrid"]
 
 
 def make_model(name, seed=42):
@@ -290,6 +335,8 @@ def make_model(name, seed=42):
         return XGBEarlyStop("reg:squarederror", seed=seed)
     if name == "xgb_huber":
         return XGBEarlyStop("reg:pseudohubererror", seed=seed)
+    if name == "hybrid":
+        return HybridModel(seed)
     raise ValueError(name)
 
 
@@ -317,10 +364,15 @@ def evaluate(y, p, normal_range=(0.2, 1.2)):
 # ----------------------------------------------------------------------------
 class SiPipeline:
     def __init__(self, cfg=None, use_lags=True, use_roll=True, use_history=True,
-                 model="xgb_huber", seed=42):
+                 model="xgb_huber", seed=42, calibrate=False, alpha=0.10, refit_on_all=True):
+        """calibrate=True adds split-conformal intervals (nominal level 1-alpha): the model is first fitted on the
+        first 85 % of the training samples and the residuals of the last 15 % set the half-width. With
+        refit_on_all=True the final model is then refitted on all samples (more data, slightly conservative
+        intervals); with False the calibrated model itself is kept (exactly the recipe in run_uncertainty.py)."""
         self.cfg = cfg or Config()
         self.use_lags, self.use_roll, self.use_history = use_lags, use_roll, use_history
         self.model_name, self.seed = model, seed
+        self.calibrate, self.alpha, self.refit_on_all = calibrate, alpha, refit_on_all
 
     # -- training ----------------------------------------------------------
     def fit(self, sensor_df, si_df):
@@ -334,8 +386,17 @@ class SiPipeline:
         feats = build_sensor_features(clean, raw, cfg, self.use_lags, self.use_roll)
         data = assemble(feats, samples, si, cfg, self.use_history)
         self.feature_names_ = [c for c in data.columns if c not in (cfg.time_col, cfg.target)]
-        self.model_ = make_model(self.model_name, self.seed)
-        self.model_.fit(data[self.feature_names_], data[cfg.target])
+        X, y = data[self.feature_names_], data[cfg.target]
+        self.q_, self.n_cal_ = None, 0
+        if self.calibrate:
+            cut = int(len(data) * 0.85)
+            m = make_model(self.model_name, self.seed).fit(X.iloc[:cut], y.iloc[:cut])
+            res = np.abs(y.iloc[cut:].values - m.predict(X.iloc[cut:]))
+            self.q_, self.n_cal_ = conformal_quantile(res, self.alpha), len(res)
+            self.model_ = make_model(self.model_name, self.seed).fit(X, y) if self.refit_on_all else m
+        else:
+            self.model_ = make_model(self.model_name, self.seed).fit(X, y)
+        self.n_train_ = len(data)
         self.train_range_ = (data[cfg.time_col].min(), data[cfg.time_col].max())
         return self
 
@@ -358,6 +419,69 @@ class SiPipeline:
             si_all = None
         data = assemble(feats, q, si_all, cfg, self.use_history)
         return data[cfg.time_col].values, self.model_.predict(data[self.feature_names_])
+
+    def predict_frame(self, sensor_df, query_times, si_history=None, stale_hours=6.0, upset_level=1.2):
+        """Production-style prediction. Returns one row per query with the prediction, an interval (if the pipeline
+        was calibrated), a status ('ok' / 'warning' / 'no_prediction') and human-readable messages.
+        Raises ValueError only for unusable inputs (missing columns, no history frame)."""
+        cfg = self.cfg
+        missing = sorted((set(cfg.sensors) | {cfg.time_col}) - set(sensor_df.columns))
+        if missing:
+            raise ValueError(f"sensor_df is missing required columns: {missing}")
+        if len(sensor_df) == 0:
+            raise ValueError("sensor_df is empty")
+        if self.use_history and si_history is None:
+            raise ValueError("si_history (previous Si lab results with columns dt, Si) is required")
+        raw = prepare_sensor_frame(sensor_df, cfg)
+        numeric = raw[cfg.sensors].apply(pd.to_numeric, errors="coerce").astype(float)
+        fault = self.cleaner_._fault_mask(numeric)
+        clean = self.cleaner_.transform(raw)
+        feats = build_sensor_features(clean, raw, cfg, self.use_lags, self.use_roll)
+        q = pd.DataFrame({cfg.time_col: pd.to_datetime(query_times), cfg.target: 0.0})
+        si_all = prepare_si_frame(si_history, cfg) if self.use_history else None
+        d = assemble_keep(feats, q, si_all, cfg, self.use_history)
+        ok = ~d[self.feature_names_].isna().any(axis=1).values
+        pred = np.full(len(d), np.nan)
+        if ok.any():
+            pred[ok] = self.model_.predict(d.loc[ok, self.feature_names_])
+        rows = []
+        for i in range(len(d)):
+            t = d[cfg.time_col].iloc[i]
+            msgs = []
+            pos = raw.index.searchsorted(t, side="right") - 1
+            if not ok[i]:
+                if pos < 0 or (t - raw.index[pos]) > pd.Timedelta(hours=cfg.align_tolerance_hours):
+                    msgs.append(f"no sensor reading within {cfg.align_tolerance_hours:g} h before the query")
+                elif self.use_history and d[["si_prev1", "si_prev2", "si_prev3"][:cfg.n_history]].iloc[i].isna().any():
+                    msgs.append(f"fewer than {cfg.n_history} previous Si results are available")
+                else:
+                    msgs.append(f"not enough sensor history (need about {cfg.warmup_hours} hourly rows before the query)")
+                rows.append((t, np.nan, np.nan, np.nan, "no_prediction", "; ".join(msgs)))
+                continue
+            if pos >= 0:
+                f_row = fault.iloc[pos]
+                bad = [c for c in cfg.sensors if f_row[c]]
+                if bad:
+                    msgs.append("faulty or missing readings were replaced: " + ", ".join(bad[:6]) + (" ..." if len(bad) > 6 else ""))
+                vals = numeric.iloc[pos]
+                beyond = [c for c in cfg.sensors if not f_row[c] and not np.isnan(vals[c])
+                          and (vals[c] < self.cleaner_.lo_[c] or vals[c] > self.cleaner_.hi_[c])]
+                if beyond:
+                    msgs.append("outside the range seen in training (clipped): " + ", ".join(beyond[:6]))
+                if vals[cfg.blast_off_col] <= 0:
+                    msgs.append("blast appears to be off (shutdown state)")
+            if self.use_history:
+                if d["hours_since_prev"].iloc[i] > stale_hours:
+                    msgs.append(f"previous Si result is {d['hours_since_prev'].iloc[i]:.1f} h old; intervals are less reliable after long gaps")
+                if d["si_prev1"].iloc[i] > upset_level:
+                    msgs.append(f"previous Si above {upset_level}: predictions and intervals are unreliable during upsets")
+            lo = hi = np.nan
+            if self.q_ is not None:
+                lo, hi = max(pred[i] - self.q_, 0.0), pred[i] + self.q_
+            rows.append((t, pred[i], lo, hi, "warning" if msgs else "ok", "; ".join(msgs)))
+        out = pd.DataFrame(rows, columns=["time", "prediction", "lower", "upper", "status", "messages"])
+        out["interval_level"] = (1 - self.alpha) if self.q_ is not None else np.nan
+        return out
 
     def save(self, path):
         joblib.dump(self, path)

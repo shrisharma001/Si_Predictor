@@ -1,34 +1,48 @@
-# Python
+# ---------------------------------------------------------------- Python
 __pycache__/
 *.py[cod]
 *.pyo
+.pytest_cache/
+.ipynb_checkpoints/
 
-# Virtual environment
+# ---------------------------------------------------------------- Virtual environments
 venv/
 .venv/
 env/
 
-# Environment variables / secrets
+# ---------------------------------------------------------------- Secrets
 .env
 .env.*
 
-# Dataset
+# ---------------------------------------------------------------- Dataset (not ours to redistribute; see README "Data")
+# The folders are kept (with an empty .gitkeep) so `docker compose` finds them; their contents are not pushed.
+data/*
+!data/.gitkeep
 *.xlsx
 *.xls
 
-# Trained models
+# ---------------------------------------------------------------- Trained models (pickles tied to library versions; rebuild with train_final.py)
+model/*
+!model/.gitkeep
 *.pkl
 *.joblib
 
-# Generated analysis
-lag_analysis_results.csv
+# ---------------------------------------------------------------- CSV files
+# Ignored by default (datasets, uploads, scratch exports) ...
+*.csv
+# ... except the experiment results, which back every number in the paper.
+!results/*.csv
 
-# IDE / editor
+# ---------------------------------------------------------------- Paper drafts and documents
+*.docx
+*.pdf
+.~lock.*
+
+# ---------------------------------------------------------------- Logs
+*.log
+
+# ---------------------------------------------------------------- IDE / editor / OS
 .vscode/
 .idea/
-
-# OS files
 .DS_Store
-
-# LibreOffice lock files
-.~lock.*
+Thumbs.db
