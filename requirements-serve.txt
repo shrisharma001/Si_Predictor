@@ -1,4 +1,6 @@
-# Minimum packages to SERVE the saved pipeline (no experiments, no TensorFlow, no plotting)
+# Minimum packages to SERVE the saved pipeline outside Docker (no experiments, no TensorFlow, no plotting).
+# The Docker image uses requirements-docker.txt instead (exact versions).
+openpyxl>=3.1      # Excel uploads and the demo replay dataset
 Flask>=2.3
 gunicorn>=21.2
 pandas>=2.0
