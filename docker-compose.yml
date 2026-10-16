@@ -1,0 +1,18 @@
+# Local demo with Docker. From the project folder:
+#   docker compose build
+#   docker compose run --rm si train      # once: trains both models into ./model_docker (about a minute)
+#   docker compose up                     # then open http://localhost:8000 ; Ctrl+C to stop
+# If your user id is not 1000 (check with `id -u`), prefix the commands with
+#   HOST_UID=$(id -u) HOST_GID=$(id -g)
+services:
+  si:
+    build: .
+    image: si-predictor:1.0
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    ports:
+      - "127.0.0.1:8000:8000"     # reachable from this computer only
+    volumes:
+      - ./data:/app/data:ro
+      - ./model_docker:/app/model      # separate from ./model, which `python app.py` on this computer uses
+    environment:
+      WORKERS: "2"

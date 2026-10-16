@@ -1,0 +1,17 @@
+# Keep the build context small and keep data and models out of the image (they are mounted).
+.git/
+venv/
+.venv/
+__pycache__/
+*.pyc
+data/
+model/
+results/
+paper/
+ui_preview/
+templates/
+*.pkl
+*.xlsx
+*.csv
+*.docx
+*.pdf

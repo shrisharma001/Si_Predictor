@@ -24,6 +24,8 @@ data/*
 # ---------------------------------------------------------------- Trained models (pickles tied to library versions; rebuild with train_final.py)
 model/*
 !model/.gitkeep
+model_docker/*
+!model_docker/.gitkeep
 *.pkl
 *.joblib
 

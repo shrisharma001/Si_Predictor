@@ -46,7 +46,10 @@ mkdir -p data model results
 | `static/` | The operator interface: `index.html`, `app.css`, `app.js` (no external libraries; fonts fall back to system fonts offline) |
 | `make_sample_request.py` | Writes `examples/sample_request.json` (72 hourly sensor rows, 10 previous Si results, a query time) |
 | `test_api.py` | 56 checks: JSON API, file uploads (CSV, Excel, mixed timestamp styles), every validation error, data-quality handling, the demo replay, the interface files, and three leakage checks (future lab results, future sensor rows, replay consistency) |
-| `Dockerfile`, `requirements-serve.txt` | Container recipe and minimal serving requirements (the Dockerfile is untested) |
+| `Dockerfile`, `docker-entrypoint.sh`, `docker-compose.yml`, `.dockerignore` | Container for the API and interface; the start-up script has `train`, `serve` and `test` commands (see "Docker") |
+| `requirements-docker.txt` | Exact library versions for the image (Python 3.12, CPU-only XGBoost) |
+| `docker_smoke_test.sh` | Builds the image and checks the whole container workflow on your machine |
+| `requirements-serve.txt` | Minimal serving requirements without exact versions, for running the API outside Docker |
 | `predict_example.py` | How the saved pipeline is called (`predict_frame`); the API and UI will use the same call |
 | `run_sensitivity.py` | One-at-a-time hyperparameter sensitivity of the hybrid (CV only; 15 variants changed MAE by -0.3 % to +0.6 %) |
 | `make_paper_figures.py` | Redraws all paper figures at single-column size into `paper/figs/` and writes `results/test_hybrid_predictions.csv`, `results/hybrid_feature_importance.csv` |
@@ -201,6 +204,29 @@ the replay data loads in the background at start-up.
   with plain-language warnings. "Show the numbers" gives a table of everything on the chart.
 - Seen in the replay: thermocouple `Tp4` reads about 3,300 °C for long stretches of 2016, which is a sensor failure. The cleaner replaces
   those readings, and the interface reports it as a warning.
+
+## Docker
+The container serves the API and interface with gunicorn. The dataset and the models are not part of the image: `./data` is
+mounted read-only and the container **trains its own models into `./model_docker`** with the image's libraries, so the saved
+pickles always match the library versions that load them. `./model` stays for `python app.py` on your computer, so the two
+sets of models never overwrite each other.
+
+```bash
+docker compose build                   # once, a few minutes
+docker compose run --rm si train       # once, about a minute: writes both models to ./model_docker
+docker compose up                      # open http://localhost:8000 ; Ctrl+C to stop
+./docker_smoke_test.sh                 # optional: builds, trains, tests and checks the running service
+```
+- If `id -u` is not 1000, prefix the commands with `HOST_UID=$(id -u) HOST_GID=$(id -g)` so the model files belong to you.
+- `docker compose run --rm si test` runs the 56 API checks inside the container.
+- The port is published on 127.0.0.1 only, so the demo is reachable from this computer only.
+- `./model_docker` (container) and `./model` (your computer) are separate on purpose: each set is trained with the libraries that load it.
+- What was tested: the Docker Hub registry was not reachable from the authoring environment, so the image itself was not built
+  there. Everything inside it was run as the container would run it: Python 3.12 with the exact pinned libraries, only the files
+  the Dockerfile copies, an unprivileged user, a read-only dataset, gunicorn with two workers, the health check, `docker stop`
+  (clean exit in about a second), all three commands and their error messages, and `docker_smoke_test.sh` end to end. With these
+  libraries the reproduction checks still pass (test MAE 0.0809 against 0.0812, coverage 0.870 against 0.868). Run
+  `./docker_smoke_test.sh` once on your machine to confirm the build.
 
 ## Prediction API
 Start: `python train_final.py` (once), `python make_sample_request.py` (once), then `python app.py` (development, http://127.0.0.1:5000) or
