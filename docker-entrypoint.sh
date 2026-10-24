@@ -2,7 +2,7 @@
 # Start-up script for the si-predictor container.
 #   serve  (default)  run the API and interface with gunicorn on port $PORT (8000)
 #   train             train the live and demo models into /app/model from the dataset in /app/data
-#   test              run the API and furnace test suites (needs the dataset and both models)
+#   test              run the API, furnace and model-health test suites (needs the dataset and both models)
 #   anything else     run that command inside the container
 set -eu
 cmd="${1:-serve}"
@@ -38,7 +38,8 @@ case "$cmd" in
   test)
     need_data
     python test_api.py
-    exec python test_furnace.py
+    python test_furnace.py
+    exec python test_health.py
     ;;
   *)
     exec "$@"

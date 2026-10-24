@@ -12,7 +12,8 @@ features, models, evaluation), served by a Flask API with an operator interface 
   - sheet `Si`: 16,589 irregularly timed Si lab results
   - sheet `symbols`: variable descriptions
 - Source: *Process data collected by blast-furnace sensors*, Mendeley Data,
-  DOI 10.17632/6d7jbc7tb5.1 (Version 1, 15 Sep 2025; the description matches: 26 sensors plus a computed ore-to-coke ratio, a raw file and a validated, class-labelled file). Check the licence on the page before publishing.
+  DOI 10.17632/6d7jbc7tb5.1
+  <!-- (Version 1, 15 Sep 2025; the description matches: 26 sensors plus a computed ore-to-coke ratio, a raw file and a validated, class-labelled file). Check the licence on the page before publishing. -->
 - Period: January 2013 to May 2016.
 
 ## Setup
@@ -44,6 +45,8 @@ mkdir -p data model results
 | `app.py` | Flask API and operator interface: `/` (interface), `/api/predict` (JSON), `/api/predict/upload` (CSV/Excel files), `/api/demo/info` and `/api/demo/replay` (held-out replay), `/api/furnaces/...` (train and use models for other furnaces), `/health`, `/api/model`, `/api/example`, `/console` (raw JSON console) |
 | `furnace.py` | Training for another furnace: reads that furnace's files, maps its column names, checks the data, runs the paper's time-ordered evaluation (3 CV folds + held-out last 15 %, against persistence, with a block-bootstrap test) and saves a model with a report (see "Other furnaces") |
 | `test_furnace.py` | 38 checks for `furnace.py` and its routes on a synthetic furnace (no dataset needed): date formats, column mapping, resampling, time order of the folds, leakage, errors for unusable data |
+| `health.py` | Model health (drift) checks: rolling MAE against persistence, interval coverage and the share of casts with replaced sensor readings; alert periods and a monthly table (see "Model health") |
+| `test_health.py` | 21 checks: alerts land where problems were planted in synthetic series, the demo route flags the January 2016 upset and the Tp4 failure, the furnace route matches its training report |
 | `make_furnace_example.py` | Writes `data/furnace_b_sensors.csv` and `data/furnace_b_si.csv`: **our own data reformatted** with other column names, fewer sensors and day-first dates, for trying the training tab (not a second furnace) |
 | `static/` | The operator interface: `index.html`, `app.css`, `app.js` (no external libraries; fonts fall back to system fonts offline) |
 | `make_sample_request.py` | Writes `examples/sample_request.json` (72 hourly sensor rows, 10 previous Si results, a query time) |
@@ -93,6 +96,7 @@ python test_pipeline.py            # 12 checks, a few minutes
 python make_sample_request.py
 python test_api.py                 # 56 checks
 python test_furnace.py             # 38 checks, about 10 s
+python test_health.py              # 21 checks
 python make_furnace_example.py     # optional: example files for the "Train for another furnace" tab
 python app.py                      # open http://127.0.0.1:5000
 ```
@@ -211,6 +215,7 @@ the replay data loads in the background at start-up.
 - The readout shows the prediction, its interval against the typical range (middle 80 % of past casts, 0.36 to 0.61 wt%), and the status
   with plain-language warnings. "Show the numbers" gives a table of everything on the chart.
 - **Train for another furnace.** See "Other furnaces" below.
+- **Model health.** See "Model health" below.
 - Seen in the replay: thermocouple `Tp4` reads about 3,300 °C for long stretches of 2016, which is a sensor failure. The cleaner replaces
   those readings, and the interface reports it as a warning.
 
@@ -242,6 +247,23 @@ column names, 19 of the 27 sensors and day-first dates, so it shows that the map
 layout. It is not evidence that the method transfers to a different furnace; only a second furnace's data can show that. On these files
 the model reaches a held-out MAE of 0.081 wt% against 0.097 for persistence (January to May 2016).
 
+## Model health
+Is the model still worth using? Each prediction is followed by a lab result, so error and interval coverage can be tracked as
+the furnace runs. The "Model health" tab shows, for the demo model over the whole held-out period (or for a trained furnace model
+over its held-out period):
+
+- **Error:** the model's MAE against that of repeating the last lab result. The model only earns its place while it is lower.
+- **Coverage:** the share of measured values inside the 90 % interval; an alert below 80 %.
+- **Inputs:** the share of casts whose latest sensor row had readings replaced by the cleaner; an alert above 10 %. (Built-in
+  model only: furnace reports keep the predictions but not the per-cast messages.)
+
+Curves and alert periods average the 100 casts around each point, so a problem is drawn where it happened; sensor-fault and
+coverage alerts are trimmed to their first and last affected cast. The "now" status uses the last 100 casts, which is what a live
+system can compute. On the held-out period it finds what the paper describes: intervals too narrow in the two January 2016
+upset episodes (61 % and 63 % coverage), the model briefly no better than persistence at the start of the first upset, short `Tp8`
+dropouts in November and December 2015, and the `Tp4` thermocouple failure (every cast from 26 February to 17 March 2016). A live
+deployment would run `health.health_report()` on its own prediction log in the same way.
+
 ## Docker
 The container serves the API and interface with gunicorn. The dataset and the models are not part of the image: `./data` is
 mounted read-only and the container **trains its own models into `./model_docker`** with the image's libraries, so the saved
@@ -255,7 +277,7 @@ docker compose up                      # open http://localhost:8000 ; Ctrl+C to 
 ./docker_smoke_test.sh                 # optional: builds, trains, tests and checks the running service
 ```
 - If `id -u` is not 1000, prefix the commands with `HOST_UID=$(id -u) HOST_GID=$(id -g)` so the model files belong to you.
-- `docker compose run --rm si test` runs the 56 API checks and the 38 furnace checks inside the container.
+- `docker compose run --rm si test` runs the 56 API checks, the 38 furnace checks and the 21 model-health checks inside the container.
 - Furnace models trained in the container's interface are saved in `./model_docker/furnaces/` and survive restarts.
 - The port is published on 127.0.0.1 only, so the demo is reachable from this computer only.
 - `./model_docker` (container) and `./model` (your computer) are separate on purpose: each set is trained with the libraries that load it.
@@ -296,4 +318,6 @@ Operating notes
   background; poll `GET /api/furnaces/<id>/job`; then `GET /api/furnaces/<id>` (report and held-out series), `GET /api/furnaces`,
   `DELETE /api/furnaces/<id>`, and `POST /api/furnaces/<id>/predict/upload` (multipart, the furnace's own columns). 409 means a job
   is already running; 410 means the upload expired.
+- Model health: `GET /api/health/demo` (demo model, held-out period; 503 if the demo is unavailable) and `GET /api/furnaces/<id>/health`
+  return the status, alert periods, monthly table and the rolling curves.
 - For the local demo, authentication is not needed. Before any cloud deployment (planned for next semester), add authentication, rate limiting and a decision on where model files are stored.

@@ -34,6 +34,10 @@ Endpoints
   DELETE /api/furnaces/<id>                delete a furnace model
   POST   /api/furnaces/<id>/predict/upload multipart: sensor_file, si_file (that furnace's own columns), query_time
 
+  Model health (health.py): drift checks on predictions that were later compared with the lab result
+  GET    /api/health/demo                  the demo model over the whole held-out period
+  GET    /api/furnaces/<id>/health         a furnace model over its held-out period
+
 Security note: model files are pickles. Only load model files you created yourself.
 """
 import io
@@ -56,6 +60,7 @@ except ImportError:
 require_version("1.4")
 from si_pipeline import SiPipeline, prepare_si_frame
 import furnace as fz
+import health as hz
 
 MAX_BODY_BYTES = 64 * 1024 * 1024    # a few years of another furnace's history
 MAX_SENSOR_ROWS = 5000          # JSON requests
@@ -339,6 +344,45 @@ def create_app(model_path=None, card_path=None, example_path=None, demo_model_pa
         return jsonify({"status": overall, "unit": "wt% Si", "results": rows, "summary": summary,
                         "lead_in": [{"time": iso(t), "si": num(v)} for t, v in zip(lead[cfg.time_col], lead[cfg.target])],
                         "model": model_meta(dpipe, "held-out demo copy", demo["card"])})
+
+    # ------------------------------------------------------------------ model health
+    health_cache = {}
+
+    @app.route("/api/health/demo")
+    def health_demo():
+        load_demo()
+        if not demo["loaded"]:
+            raise ApiError(503, "demo_unavailable", demo["error"])
+        if "demo" not in health_cache:          # the held-out period never changes, so compute it once per worker
+            held, si, sensor, dpipe = demo["held"], demo["si"], demo["sensor"], demo["pipe"]
+            q = list(held[cfg.time_col])
+            win = sensor[(sensor["dt"] > q[0] - pd.Timedelta(hours=48)) & (sensor["dt"] <= q[-1])]
+            hist = si[si[cfg.time_col] < q[-1]].rename(columns={cfg.time_col: "dt", cfg.target: "Si"})
+            results, _, _ = run_predictions(dpipe, win, hist, q)
+            series = si.set_index(cfg.time_col)[cfg.target]
+            prev = series.shift(1)
+            ok = [r for r in results if r["prediction"] is not None]
+            t = pd.DatetimeIndex([r["time"] for r in ok])
+            rep_ = hz.health_report(t, series.loc[t], [r["prediction"] for r in ok], [r["lower"] for r in ok],
+                                    [r["upper"] for r in ok], prev.loc[t], [hz.faulty_sensors(r["messages"]) for r in ok])
+            rep_.update(source={"kind": "demo", "name": "Built-in model, held-out period",
+                                "note": "The demo model was trained up to " + str(dpipe.train_range_[1])[:10] +
+                                        "; every prediction here uses only data from before its cast."},
+                        not_predicted=len(results) - len(ok))
+            health_cache["demo"] = rep_
+        return jsonify(health_cache["demo"])
+
+    @app.route("/api/furnaces/<fid>/health")
+    def furnace_health(fid):
+        _, fcard = fz.load_furnace(furnace_root, fid)
+        s = fz.read_json(os.path.join(fz.furnace_dir(furnace_root, fid), "test_series.json"))
+        if not s:
+            raise ApiError(404, "no_series", "This furnace model has no held-out series")
+        rep_ = hz.health_report(s["time"], s["actual"], s["prediction"], s["lower"], s["upper"], s["persistence"])
+        rep_.update(source={"kind": "furnace", "name": f"{fcard['name']}, held-out period", "furnace_id": fid,
+                            "note": "Sensor-fault tracking is not available here: the report keeps the predictions, not the messages."},
+                    not_predicted=0)
+        return jsonify(rep_)
 
     if preload_demo:      # read the replay dataset in the background so the first replay does not stall for ~10 s
         threading.Thread(target=load_demo, name="demo-preload", daemon=True).start()

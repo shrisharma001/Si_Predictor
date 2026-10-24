@@ -22,6 +22,7 @@
       <button role="tab" id="tab-replay" aria-selected="true" aria-controls="panel-replay">Replay held-out casts</button>
       <button role="tab" id="tab-files" aria-selected="false" aria-controls="panel-files" tabindex="-1">Predict from my files</button>
       <button role="tab" id="tab-train" aria-selected="false" aria-controls="panel-train" tabindex="-1">Train for another furnace</button>
+      <button role="tab" id="tab-health" aria-selected="false" aria-controls="panel-health" tabindex="-1">Model health</button>
     </div>
 
     <section id="panel-replay" role="tabpanel" aria-labelledby="tab-replay" class="controls">
@@ -163,6 +164,42 @@
           </table>
         </div>
       </div>
+    </section>
+
+    <section id="panel-health" role="tabpanel" aria-labelledby="tab-health" class="controls" hidden>
+      <p class="lede">Is the model still worth using? Every prediction is checked against the lab result that follows it. Over a moving
+        window of casts this view compares the model’s error with simply repeating the last result, checks that the 90 % intervals
+        still hold about 90 % of the measured values, and counts sensor readings the cleaner had to replace.</p>
+      <div class="control-row">
+        <label>Model
+          <select id="health-source"><option value="demo">Built-in model, held-out period</option></select>
+        </label>
+      </div>
+      <p id="health-status" class="verdict" data-level="none" aria-live="polite">Loading…</p>
+      <p id="health-summary" class="hint"></p>
+      <div class="health-charts">
+        <svg id="health-chart" class="health-chart" role="img" aria-labelledby="health-chart-desc"></svg>
+        <p id="health-chart-desc" class="visually-hidden"></p>
+      </div>
+      <ul class="legend health-legend" aria-label="Legend">
+        <li><svg viewBox="0 0 24 8" aria-hidden="true"><line x1="0" y1="4" x2="24" y2="4" class="pen-predicted"/></svg>Model</li>
+        <li><svg viewBox="0 0 24 8" aria-hidden="true"><line x1="0" y1="4" x2="24" y2="4" class="pen-persist"/></svg>Repeat last result</li>
+        <li><svg viewBox="0 0 24 8" aria-hidden="true"><line x1="0" y1="4" x2="24" y2="4" class="pen-measured"/></svg>Interval coverage</li>
+        <li id="health-fault-legend"><svg viewBox="0 0 24 8" aria-hidden="true"><line x1="0" y1="4" x2="24" y2="4" class="pen-fault"/></svg>Casts with replaced readings</li>
+        <li><svg viewBox="0 0 24 8" aria-hidden="true"><rect x="0" y="0" width="24" height="8" class="alert-swatch"/></svg>Alert period</li>
+      </ul>
+      <h2 class="step-title">Alerts</h2>
+      <ul id="health-alerts" class="alerts"></ul>
+      <details class="table-view">
+        <summary>Month by month</summary>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th scope="col">Month</th><th scope="col">Casts</th><th scope="col">Model MAE</th><th scope="col">Repeat-last MAE</th>
+              <th scope="col">Interval coverage</th><th scope="col" id="health-fault-col">Casts with replaced readings</th><th scope="col">Highest Si</th></tr></thead>
+            <tbody id="health-months"></tbody>
+          </table>
+        </div>
+      </details>
     </section>
 
     <p id="error" class="error" role="alert" hidden></p>

@@ -23,7 +23,7 @@ WORKDIR /app
 COPY requirements-docker.txt .
 RUN pip install -r requirements-docker.txt
 
-COPY si_pipeline.py furnace.py app.py train_final.py run_experiments.py run_extra.py test_api.py test_furnace.py docker-entrypoint.sh ./
+COPY si_pipeline.py furnace.py health.py app.py train_final.py run_experiments.py run_extra.py test_api.py test_furnace.py test_health.py docker-entrypoint.sh ./
 COPY static ./static
 COPY examples ./examples
 

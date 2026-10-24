@@ -570,6 +570,9 @@ async function showReport(fid) {
 async function refreshFurnaces() {
   try { train.furnaces = (await readJson(await fetch("/api/furnaces"))).furnaces; } catch (_) { return; }
   const ready = train.furnaces.filter((f) => f.verdict);
+  const hs = $("health-source"), keepH = hs.value;
+  hs.replaceChildren(); option(hs, "demo", "Built-in model, held-out period");
+  for (const f of ready) option(hs, f.furnace_id, `${f.name}, held-out period`, f.furnace_id === keepH);
   const sel = $("files-model"), keep = sel.value;
   sel.replaceChildren(); option(sel, "", "Built-in model (this furnace)");
   for (const f of ready) option(sel, f.furnace_id, f.name, f.furnace_id === keep);
@@ -633,7 +636,111 @@ function initTraining() {
     selectTab("tab-files"); $("files-model").value = train.current.furnace_id; updateFilesLede(); $("tab-files").focus();
   });
   $("files-model").addEventListener("change", updateFilesLede);
+  $("health-source").addEventListener("change", loadHealth);
+  new ResizeObserver(() => { if (health.report && !$("panel-health").hidden) drawHealth(health.report); }).observe($("health-chart"));
   refreshFurnaces();
+}
+
+/* ---------------------------------------------------------------- model health */
+const health = { report: null, seq: 0 };
+const KIND = { coverage: "Intervals too narrow", error: "Not better than repeating", inputs: "Sensor faults" };
+
+async function loadHealth() {
+  const src = $("health-source").value, seq = ++health.seq;
+  const url = src === "demo" ? "/api/health/demo" : `/api/furnaces/${encodeURIComponent(src)}/health`;
+  $("health-status").dataset.level = "none"; $("health-status").textContent = "Checking the predictions against the lab results…";
+  try {
+    const rep = await readJson(await fetch(url));
+    if (seq !== health.seq) return;               // a newer selection is loading
+    health.report = rep; showError(""); renderHealth(rep);
+  } catch (e) { if (seq === health.seq) { $("health-status").textContent = ""; showError(e.message); } }
+}
+
+function renderHealth(rep) {
+  const st = $("health-status"); st.dataset.level = rep.status.level;
+  st.textContent = (rep.status.level === "ok" ? "Healthy now. " : "Needs attention now. ") + rep.status.text;
+  const o = rep.overall;
+  $("health-summary").textContent = `${rep.source.name}: ${rep.casts.toLocaleString("en-GB")} casts from ${fmtDate(rep.from)} to ${fmtDate(rep.to)}. ` +
+    `Overall MAE ${fmtNum(o.mae, 3)} wt% against ${fmtNum(o.persistence_mae, 3)} for repeating the last result; intervals held ${fmtPct(o.coverage, 1)}. ` +
+    `Each curve point averages the ${rep.window} casts around it; “now” uses the last ${rep.window}. ${rep.source.note}`;
+  const ul = $("health-alerts"); ul.replaceChildren();
+  if (!rep.alerts.length) { const li = document.createElement("li"); li.textContent = "No alerts in this period."; ul.appendChild(li); }
+  for (const a of rep.alerts) {
+    const li = document.createElement("li");
+    const when = document.createElement("span"); when.className = "when";
+    when.textContent = `${fmtDate(a.from)} to ${fmtDate(a.to)} · `;
+    const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = KIND[a.kind] || a.kind;
+    when.appendChild(kind);
+    li.append(when, document.createTextNode(a.text));
+    ul.appendChild(li);
+  }
+  const hasFault = rep.rolling.fault_share !== undefined;
+  $("health-fault-col").hidden = !hasFault; $("health-fault-legend").hidden = !hasFault;
+  const body = $("health-months"); body.replaceChildren();
+  for (const m of rep.monthly) {
+    const tr = document.createElement("tr");
+    const label = new Date(`${m.month}-01T00:00:00`).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+    cell(tr, label); cell(tr, m.casts); cell(tr, fmtNum(m.mae, 3)); cell(tr, fmtNum(m.persistence_mae, 3)); cell(tr, fmtPct(m.coverage));
+    if (hasFault) cell(tr, fmtPct(m.fault_share)); cell(tr, fmtNum(m.max_si, 2));
+    body.appendChild(tr);
+  }
+  $("health-chart-desc").textContent = `Rolling error of the model and of repeating the last result, rolling interval coverage` +
+    (hasFault ? " and the share of casts with replaced sensor readings" : "") + `, with ${rep.alerts.length} alert periods shaded.`;
+  drawHealth(rep);
+}
+
+function drawHealth(rep) {
+  const svg = $("health-chart"); svg.replaceChildren();
+  const W = svg.clientWidth || 900, H = svg.clientHeight || 420;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const r = rep.rolling, times = r.time.map((x) => parseT(x).getTime());
+  if (!times.length) return;
+  const hasFault = r.fault_share !== undefined;
+  const m = { l: 48, r: 14, t: 8, b: 26 }, gap = 26;
+  const panels = hasFault ? [0.42, 0.33, 0.25] : [0.55, 0.45];
+  const inner = H - m.t - m.b - gap * (panels.length - 1);
+  let y0 = m.t;
+  const boxes = panels.map((f) => { const b = { top: y0 + 16, h: f * inner - 16 }; y0 += f * inner + gap; return b; });
+  const t0 = Math.min(times[0], parseT(rep.from).getTime()), t1 = Math.max(times[times.length - 1], parseT(rep.to).getTime());
+  const X = (t) => m.l + ((t - t0) / Math.max(1, t1 - t0)) * (W - m.l - m.r);
+  const line = (vals, Y, cls, g) => {
+    let d = "", pen = false;
+    vals.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? "L" : "M"}${X(times[i])},${Y(v)}`; pen = true; });
+    el("path", { d, class: cls }, g);
+  };
+  const panel = (box, title, lo, hi, ticks, fmt, refs, kind) => {
+    const g = el("g", {}, svg);
+    const Y = (v) => box.top + (1 - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo)) * box.h;
+    for (const a of rep.alerts.filter((x) => x.kind === kind)) {
+      const a0 = X(parseT(a.from).getTime()), a1 = X(parseT(a.to).getTime());
+      el("rect", { x: a0, y: box.top, width: Math.max(2, a1 - a0), height: box.h, class: "alert-band" }, g);
+    }
+    for (const v of ticks) { el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: "grid-major" }, g); svgText(g, m.l - 6, Y(v) + 4, fmt(v), "axis-text", "end"); }
+    for (const [v, label] of refs) { el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: "ref" }, g); svgText(g, W - m.r - 4, Y(v) - 4, label, "axis-text", "end"); }
+    svgText(g, m.l, box.top - 5, title, "panel-title");
+    return { g, Y };
+  };
+  const errMax = Math.max(0.05, ...r.mae.filter((v) => v !== null), ...r.persistence_mae.filter((v) => v !== null));
+  const top = Math.ceil(errMax * 1.1 * 20) / 20, step = top > 0.2 ? 0.1 : 0.05;
+  const ticksE = []; for (let v = 0; v <= top + 1e-9; v += step) ticksE.push(+v.toFixed(2));
+  const p1 = panel(boxes[0], "Average error around each point (wt% Si)", 0, top, ticksE, (v) => fmtNum(v, 2), [], "error");
+  line(r.persistence_mae, p1.Y, "line-persist", p1.g); line(r.mae, p1.Y, "line-model", p1.g);
+  const p2 = panel(boxes[1], "Measured values inside the 90 % interval", 0.4, 1.0, [0.4, 0.6, 0.8, 1.0], (v) => fmtPct(v),
+    [[rep.level, "target"], [rep.thresholds.coverage, "alert below"]], "coverage");
+  line(r.coverage, p2.Y, "line-cov", p2.g);
+  if (hasFault) {
+    const p3 = panel(boxes[2], "Casts with replaced sensor readings", 0, 1, [0, 0.5, 1], (v) => fmtPct(v), [[rep.thresholds.fault_share, "alert above"]], "inputs");
+    line(r.fault_share, p3.Y, "line-fault", p3.g);
+  }
+  // month labels along the bottom
+  const d = new Date(t0); d.setDate(1); d.setHours(0, 0, 0, 0); d.setMonth(d.getMonth() + 1);
+  const months = []; for (let x = new Date(d); x.getTime() <= t1; x.setMonth(x.getMonth() + 1)) months.push(new Date(x));
+  const every = Math.max(1, Math.ceil(months.length / Math.max(2, Math.floor((W - m.l - m.r) / 70))));
+  months.forEach((x, i) => {
+    if (i % every) return;
+    el("line", { x1: X(x.getTime()), x2: X(x.getTime()), y1: m.t + 16, y2: H - m.b, class: "ref", opacity: 0.35 }, svg);
+    svgText(svg, X(x.getTime()), H - m.b + 17, x.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }), "axis-text", "middle");
+  });
 }
 
 /* ---------------------------------------------------------------- set-up */
@@ -643,16 +750,18 @@ function applyModelMeta(meta) {
   if (meta.interval_level) state.level = meta.interval_level;
 }
 
-const TABS = [["tab-replay", "panel-replay"], ["tab-files", "panel-files"], ["tab-train", "panel-train"]];
+const TABS = [["tab-replay", "panel-replay"], ["tab-files", "panel-files"], ["tab-train", "panel-train"], ["tab-health", "panel-health"]];
 function selectTab(which) {
   for (const [tab, panel] of TABS) {
     const on = tab === which;
     $(tab).setAttribute("aria-selected", on); $(tab).tabIndex = on ? 0 : -1; $(panel).hidden = !on;
   }
+  document.body.dataset.tab = which;
   stopPlayback(); showError("");
   state.measured = []; state.predicted = []; state.replay = null; state.xDomain = null; state.yMax = null;
   $("running").textContent = ""; setReadout(null); render();
   if (which === "tab-train" && train.current && !$("train-report").hidden) showReport(train.current.furnace_id);   // put its chart back
+  if (which === "tab-health") loadHealth();
 }
 
 async function init() {

@@ -182,7 +182,32 @@ progress { width: min(32rem, 100%); height: 0.8rem; accent-color: var(--steel); 
 .tag[data-level="weak"] { color: var(--warn); }
 .tag[data-level="poor"] { color: var(--predicted); }
 
+/* model health tab */
+body[data-tab="tab-health"] .readout, body[data-tab="tab-health"] .recorder { display: none; }
+.health-charts { background: var(--paper); border: 1px solid var(--grid-major); border-radius: 4px; margin: 0.6rem 0 0.4rem; }
+.health-chart { display: block; width: 100%; height: 420px; }
+.health-chart .grid-major { stroke: var(--grid-major); stroke-width: 1; }
+.health-chart .axis-text { fill: var(--ink-2); font: 400 12px var(--font); font-variant-numeric: tabular-nums; }
+.health-chart .panel-title { fill: var(--ink); font: 600 12px var(--font); }
+.health-chart .line-model { fill: none; stroke: var(--predicted); stroke-width: 2; }
+.health-chart .line-persist { fill: none; stroke: #6b7479; stroke-width: 1.5; stroke-dasharray: 5 3; }
+.health-chart .line-cov { fill: none; stroke: var(--measured); stroke-width: 2; }
+.health-chart .line-fault { fill: none; stroke: var(--warn); stroke-width: 2; }
+.health-chart .ref { stroke: #6b7479; stroke-width: 1; stroke-dasharray: 2 3; }
+.health-chart .alert-band { fill: rgba(156, 90, 0, 0.13); }
+.pen-persist { stroke: #6b7479; stroke-width: 2; stroke-dasharray: 5 3; }
+.pen-fault { stroke: var(--warn); stroke-width: 2; }
+.alert-swatch { fill: rgba(156, 90, 0, 0.18); }
+.health-legend { margin-bottom: 1rem; }
+.verdict[data-level="ok"] { border-color: var(--ok); }
+.verdict[data-level="alert"] { border-color: var(--warn); }
+.alerts { margin: 0 0 1rem; padding: 0; list-style: none; max-width: 86ch; }
+.alerts li { padding: 0.45rem 0.7rem; border-left: 3px solid var(--warn); background: #fff; margin-bottom: 0.4rem; }
+.alerts .when { display: block; font-weight: 600; font-size: 0.9rem; }
+.alerts .kind { font-weight: 500; color: var(--ink-2); }
+
 @media (max-width: 860px) {
+  .health-chart { height: 380px; }
   .map-grid { grid-template-columns: 1fr; }
   .readout { grid-template-columns: 1fr; gap: 1rem; }
   #pred-value { font-size: 3.6rem; }
