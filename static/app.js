@@ -1,4 +1,5 @@
-/* Hot-metal silicon interface: replay of held-out casts and prediction from uploaded files. No dependencies. */
+/* Hot-metal silicon interface: replay of held-out casts, prediction from uploaded files, and training a model for
+   another furnace. No dependencies. Column names from uploaded files are shown with textContent only. */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -110,10 +111,11 @@ function drawGauge(p) {
 }
 
 /* ---------------------------------------------------------------- chart */
-function niceTimeStep(hours) {
-  const steps = [1, 2, 3, 6, 12, 24, 48, 72, 168, 336];
-  for (const s of steps) if (hours / s <= 9) return s;
-  return 720;
+function niceTimeStep(hours, width = 800) {
+  const maxLabels = Math.max(3, Math.min(9, Math.floor(width / 75)));     // room for "25 Jan" at each label
+  const steps = [1, 2, 3, 6, 12, 24, 48, 72, 168, 336, 720, 1440];
+  for (const s of steps) if (hours / s <= maxLabels) return s;
+  return 2160;
 }
 function segments(points, maxGapH = 6) {
   const out = []; let cur = [];
@@ -151,7 +153,7 @@ function drawChart() {
     el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), class: isMajor ? "grid-major" : "grid-minor" }, g);
     if (isMajor) svgText(g, m.l - 6, Y(v) + 4, fmtNum(v, 1), "axis-text", "end");
   }
-  const hours = (t1 - t0) / 3.6e6, stepH = niceTimeStep(hours), minorH = stepH >= 24 ? stepH / 4 : Math.max(stepH / 3, 1);
+  const hours = (t1 - t0) / 3.6e6, stepH = niceTimeStep(hours, W - m.l - m.r), minorH = stepH >= 24 ? stepH / 4 : Math.max(stepH / 3, 1);
   const start = new Date(t0); start.setMinutes(0, 0, 0);
   if (stepH >= 24) start.setHours(0);
   for (let t = start.getTime(); t <= t1; t += minorH * 3.6e6) {
@@ -352,23 +354,286 @@ async function predictFromFiles(ev) {
   fd.append("sensor_file", $("sensor-file").files[0]);
   fd.append("si_file", $("si-file").files[0]);
   fd.append("query_time", $("files-time").value);
+  const fid = $("files-model").value;
+  const url = fid ? `/api/furnaces/${encodeURIComponent(fid)}/predict/upload` : "/api/predict/upload";
   const btn = $("files-go");
   btn.disabled = true; btn.textContent = "Reading files…";
   try {
-    const body = await readJson(await fetch("/api/predict/upload", { method: "POST", body: fd }));
+    const body = await readJson(await fetch(url, { method: "POST", body: fd }));
     applyModelMeta(body.model);
     const r = body.results[0];
     state.measured = body.context.si_history.map((p) => ({ t: parseT(p.time), v: p.si }));
     state.predicted = [toPred({ ...r, actual: undefined })];
     state.xDomain = null; state.yMax = null; state.replay = null;
     setReadout(state.predicted[0]);
-    $("running").textContent = `Used ${body.context.sensor_rows_used} hourly sensor rows from ${fmtTime(parseT(body.context.sensor_from))} to ${fmtTime(parseT(body.context.sensor_to))}, and the ${state.measured.length} lab results shown before the cast.`;
+    $("running").textContent = `Used ${body.context.sensor_rows_used} sensor rows from ${fmtTime(parseT(body.context.sensor_from))} to ${fmtTime(parseT(body.context.sensor_to))}, and the ${state.measured.length} lab results shown before the cast.`;
     render();
   } catch (e) {
     showError(e.message);
   } finally {
     btn.disabled = false; btn.textContent = "Predict next cast";
   }
+}
+
+/* ---------------------------------------------------------------- another furnace */
+const train = { upload: null, polling: null, furnaces: [], current: null };
+const fmtPct = (v, d = 0) => (v === null || v === undefined ? "–" : `${(v * 100).toFixed(d)} %`);
+const fmtDate = (s) => (s ? new Date(s).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–");
+function option(sel, value, text, selected = false) {
+  const o = document.createElement("option"); o.value = value; o.textContent = text; o.selected = selected; sel.appendChild(o); return o;
+}
+function cell(tr, text) { const td = document.createElement("td"); td.textContent = text; tr.appendChild(td); return td; }
+
+function sheetOf(role) {
+  const sheets = role === "sensor" ? train.upload.sensor_sheets : train.upload.si_sheets;
+  return sheets[$(role === "sensor" ? "map-sensor-sheet" : "map-si-sheet").value];
+}
+function timeColumns(sheet) { return sheet.columns.filter((c) => c.kind === "time").map((c) => c.name); }
+function numericColumns(sheet) { return sheet.columns.filter((c) => c.kind === "numeric"); }
+
+function fillSelect(sel, values, chosen, emptyLabel = null) {
+  sel.replaceChildren();
+  if (emptyLabel !== null) option(sel, "", emptyLabel, !chosen);
+  for (const v of values) option(sel, v, v, v === chosen);
+  if (!values.length && emptyLabel === null) option(sel, "", "No suitable column", true);
+}
+
+function renderSensorSide(useSuggestion) {
+  const sh = sheetOf("sensor"), sug = train.upload.suggested.sensor;
+  const times = timeColumns(sh);
+  fillSelect($("map-sensor-time"), times, useSuggestion && times.includes(sug.time_col) ? sug.time_col : times[0]);
+  const tcol = $("map-sensor-time").value;
+  const meta = sh.columns.find((c) => c.name === tcol) || {};
+  $("map-sensor-dayfirst").checked = useSuggestion ? sug.dayfirst : !!meta.dayfirst_suggested;
+  $("map-sensor-info").textContent = `${sh.rows.toLocaleString("en-GB")} rows.` +
+    (meta.dayfirst_ambiguous ? " The dates could be day-first or month-first; check the box if days come first." : "");
+  const box = $("map-sensors"); box.replaceChildren();
+  const chosen = new Set(useSuggestion ? sug.columns : []);
+  for (const c of numericColumns(sh)) {
+    if (c.name === tcol) continue;
+    const lab = document.createElement("label"); lab.dataset.name = c.name;
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.value = c.name;
+    cb.checked = useSuggestion ? chosen.has(c.name) : c.missing_share < 0.5;
+    cb.addEventListener("change", updateSensorCount);
+    const name = document.createElement("span"); name.textContent = c.name;
+    const ex = document.createElement("span"); ex.className = "ex"; ex.textContent = c.example ?? "";
+    lab.append(cb, name, ex);
+    if (c.missing_share >= 0.5) { const f = document.createElement("span"); f.className = "flag"; f.textContent = `${fmtPct(c.missing_share)} empty`; lab.appendChild(f); }
+    box.appendChild(lab);
+  }
+  updateSensorCount(useSuggestion ? sug.blast_off_col : null);
+}
+
+function selectedSensors() { return [...$("map-sensors").querySelectorAll("input:checked")].map((cb) => cb.value); }
+function updateSensorCount(prefBlast) {
+  const sel = selectedSensors();
+  $("map-sensor-count").textContent = `Sensors: ${sel.length} selected`;
+  const blast = $("map-blast"), keep = typeof prefBlast === "string" ? prefBlast : blast.value;
+  fillSelect(blast, sel, sel.includes(keep) ? keep : "", "None");
+}
+
+function renderSiSide(useSuggestion) {
+  const sh = sheetOf("si"), sug = train.upload.suggested.si;
+  const times = timeColumns(sh), nums = numericColumns(sh).map((c) => c.name);
+  fillSelect($("map-si-time"), times, useSuggestion && times.includes(sug.time_col) ? sug.time_col : times[0]);
+  fillSelect($("map-si-value"), nums, useSuggestion && nums.includes(sug.value_col) ? sug.value_col : nums[0]);
+  const meta = sh.columns.find((c) => c.name === $("map-si-time").value) || {};
+  $("map-si-dayfirst").checked = useSuggestion ? sug.dayfirst : !!meta.dayfirst_suggested;
+  $("map-si-info").textContent = `${sh.rows.toLocaleString("en-GB")} rows.` +
+    (meta.dayfirst_ambiguous ? " The dates could be day-first or month-first; check the box if days come first." : "");
+}
+
+function renderMapping() {
+  const up = train.upload;
+  $("map-sensor-file").textContent = `(${up.files.sensor})`;
+  $("map-si-file").textContent = `(${up.files.si})`;
+  for (const [role, sheets, sug] of [["sensor", up.sensor_sheets, up.suggested.sensor], ["si", up.si_sheets, up.suggested.si]]) {
+    const sel = $(`map-${role}-sheet`), names = Object.keys(sheets);
+    fillSelect(sel, names, sug.sheet);
+    $(`map-${role}-sheet-wrap`).hidden = names.length < 2;
+  }
+  renderSensorSide(true); renderSiSide(true);
+  if (!$("map-name").value) $("map-name").value = up.files.sensor.replace(/\.[^.]+$/, "").replace(/[_-]?sensors?$/i, "").replace(/[_-]+/g, " ").trim().slice(0, 60);
+  $("train-map").hidden = false;
+}
+
+async function readTrainingFiles(ev) {
+  ev.preventDefault(); showError("");
+  const fd = new FormData();
+  fd.append("sensor_file", $("train-sensor").files[0]);
+  fd.append("si_file", $("train-si").files[0]);
+  const btn = $("train-read");
+  btn.disabled = true; btn.textContent = "Reading files…";
+  try {
+    train.upload = await readJson(await fetch("/api/furnaces/inspect", { method: "POST", body: fd }));
+    $("train-report").hidden = true;
+    renderMapping();
+    $("train-map").scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  } catch (e) { showError(e.message); } finally { btn.disabled = false; btn.textContent = "Read files"; }
+}
+
+function collectMapping() {
+  return {
+    sensor: { sheet: $("map-sensor-sheet").value, time_col: $("map-sensor-time").value, columns: selectedSensors(),
+      blast_off_col: $("map-blast").value || null, dayfirst: $("map-sensor-dayfirst").checked },
+    si: { sheet: $("map-si-sheet").value, time_col: $("map-si-time").value, value_col: $("map-si-value").value,
+      dayfirst: $("map-si-dayfirst").checked },
+  };
+}
+
+async function startTraining(ev) {
+  ev.preventDefault(); showError("");
+  for (const l of $("map-sensors").querySelectorAll("label.problem")) l.classList.remove("problem");
+  const btn = $("train-go");
+  btn.disabled = true;
+  try {
+    const body = await readJson(await fetch("/api/furnaces/train", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ upload_id: train.upload.upload_id, name: $("map-name").value, mapping: collectMapping() }) }));
+    $("train-progress").hidden = false; $("train-report").hidden = true;
+    $("train-bar").value = 0; $("train-step").textContent = "Waiting to start";
+    pollJob(body.furnace_id);
+  } catch (e) { showError(e.message); btn.disabled = false; }
+}
+
+function pollJob(fid) {
+  clearInterval(train.polling);
+  const tick = async () => {
+    let job;
+    try { job = await readJson(await fetch(`/api/furnaces/${encodeURIComponent(fid)}/job`)); } catch (e) { return; }
+    $("train-bar").value = job.progress || 0;
+    $("train-step").textContent = job.status === "running" ? `${job.step}…` : (job.step || "");
+    if (job.status === "done" || job.status === "failed") {
+      clearInterval(train.polling); train.polling = null;
+      $("train-go").disabled = false; $("train-progress").hidden = true;
+      if (job.status === "failed") {
+        const err = job.error || {};
+        let msg = err.message || "Training failed.";
+        const bad = err.details && err.details.sensors;
+        if (bad) {
+          msg += ` ${bad.join(", ")}`;
+          for (const l of $("map-sensors").querySelectorAll("label")) if (bad.includes(l.dataset.name)) l.classList.add("problem");
+        }
+        if (err.details && err.details.missing) msg += `: ${err.details.missing.join(", ")}`;
+        showError(msg);
+      } else {
+        await refreshFurnaces();
+        await showReport(fid);
+      }
+    }
+  };
+  train.polling = setInterval(tick, 1500); tick();
+}
+
+async function showReport(fid) {
+  showError("");
+  let card;
+  try { card = await readJson(await fetch(`/api/furnaces/${encodeURIComponent(fid)}`)); } catch (e) { showError(e.message); return; }
+  train.current = card;
+  const ev = card.evaluation, t = ev.test;
+  $("report-title").textContent = `Result for ${card.name}`;
+  const v = $("report-verdict"); v.dataset.level = ev.verdict.level; v.textContent = ev.verdict.text;
+  const cvMean = (key) => ev.folds.reduce((s, f) => s + f[key].mae, 0) / ev.folds.length;
+  const body = $("report-body"); body.replaceChildren();
+  for (const [label, key] of [["This model", "model"], ["Repeat the last lab result", "persistence"], ["Training average", "mean"]]) {
+    const tr = document.createElement("tr");
+    cell(tr, label); cell(tr, fmtNum(t[key].mae, 3)); cell(tr, fmtNum(t[key].r2, 2)); cell(tr, fmtPct(t[key].within_0_1)); cell(tr, fmtNum(cvMean(key), 3));
+    body.appendChild(tr);
+  }
+  const facts = $("report-facts"); facts.replaceChildren();
+  const add = (text, cls) => { const li = document.createElement("li"); li.textContent = text; if (cls) li.className = cls; facts.appendChild(li); };
+  const boot = ev.test_vs_persistence;
+  add(`Held-out period ${fmtDate(t.from)} to ${fmtDate(t.to)}: ${t.n.toLocaleString("en-GB")} casts the model never saw. ` +
+      `Difference in MAE against repeating the last result: ${fmtNum(boot.diff, 4)} wt% (95 % interval ${fmtNum(boot.ci[0], 4)} to ${fmtNum(boot.ci[1], 4)}).`);
+  const cvCov = ev.folds.reduce((s, f) => s + f.coverage, 0) / ev.folds.length;
+  add(`90 % intervals held the measured value in ${fmtPct(t.coverage, 1)} of held-out casts (${fmtPct(cvCov, 1)} in cross-validation); ` +
+      `they are ±${fmtNum(card.interval_half_width, 2)} wt% wide.`);
+  add(`Trained on ${card.training_samples.toLocaleString("en-GB")} Si results from ${fmtDate(card.training_range[0])} to ${fmtDate(card.training_range[1])}, ` +
+      `with ${card.mapping.sensor.columns.length} sensors (${card.n_features} inputs), in ${card.training_seconds} s.`);
+  if (card.sensor_faults.length) add(`Readings replaced most often: ${card.sensor_faults.slice(0, 4).map((f) => `${f.sensor} (${fmtPct(f.share, 1)})`).join(", ")}.`);
+  add(`Warnings are raised when the previous Si result is above ${fmtNum(card.upset_level, 2)} wt% (top 0.5 % of this furnace’s history) or older than ${card.stale_hours} h.`);
+  for (const w of card.warnings) add(sentence(w), "warn");
+  $("train-report").hidden = false;
+
+  // the held-out period on the recorder chart
+  const s = card.test_series;
+  stopPlayback();
+  state.typical = card.typical_si_range; state.level = card.interval_level;
+  state.measured = s.time.map((x, i) => ({ t: parseT(x), v: s.actual[i] }));
+  state.predicted = s.time.map((x, i) => ({ t: parseT(x), v: s.prediction[i], lo: s.lower[i], hi: s.upper[i], status: "ok", messages: [], actual: s.actual[i] }));
+  state.xDomain = null; state.yMax = null; state.replay = null;
+  setReadout(state.predicted[state.predicted.length - 1]);
+  $("pred-when").textContent = `Last held-out cast, ${fmtTime(state.predicted[state.predicted.length - 1].t)}`;
+  $("running").textContent = `${card.name}, held-out period: average error ${fmtNum(t.model.mae, 3)} wt%, against ${fmtNum(t.persistence.mae, 3)} for repeating the last lab result.`;
+  render();
+}
+
+async function refreshFurnaces() {
+  try { train.furnaces = (await readJson(await fetch("/api/furnaces"))).furnaces; } catch (_) { return; }
+  const ready = train.furnaces.filter((f) => f.verdict);
+  const sel = $("files-model"), keep = sel.value;
+  sel.replaceChildren(); option(sel, "", "Built-in model (this furnace)");
+  for (const f of ready) option(sel, f.furnace_id, f.name, f.furnace_id === keep);
+  updateFilesLede();
+  const body = $("furnace-body"); body.replaceChildren();
+  $("furnace-list-wrap").hidden = train.furnaces.length === 0;
+  for (const f of train.furnaces) {
+    const tr = document.createElement("tr");
+    cell(tr, f.name);
+    if (f.verdict) {
+      cell(tr, fmtDate(f.training_range[1]));
+      cell(tr, `${fmtNum(f.test_mae, 3)} vs ${fmtNum(f.persistence_mae, 3)} wt%`);
+      const tag = document.createElement("span"); tag.className = "tag"; tag.dataset.level = f.verdict;
+      tag.textContent = { good: "Better than repeating", weak: "Not clearly better", poor: "Not better" }[f.verdict];
+      cell(tr, "").appendChild(tag);
+    } else { cell(tr, "–"); cell(tr, f.status === "failed" ? "Training failed" : "Training…"); cell(tr, ""); }
+    const actions = cell(tr, "");
+    if (f.verdict) {
+      const view = document.createElement("button"); view.type = "button"; view.className = "small"; view.textContent = "Report";
+      view.setAttribute("aria-label", `Report for ${f.name}`);
+      view.addEventListener("click", () => showReport(f.furnace_id)); actions.appendChild(view);
+    }
+    const del = document.createElement("button"); del.type = "button"; del.className = "small"; del.textContent = "Delete";
+    del.setAttribute("aria-label", `Delete ${f.name}`);
+    del.addEventListener("click", async () => {
+      if (!window.confirm(`Delete the model for ${f.name}? This cannot be undone.`)) return;
+      try { await readJson(await fetch(`/api/furnaces/${encodeURIComponent(f.furnace_id)}`, { method: "DELETE" })); } catch (e) { showError(e.message); }
+      if (train.current && train.current.furnace_id === f.furnace_id) { $("train-report").hidden = true; train.current = null; }
+      refreshFurnaces();
+    });
+    actions.appendChild(del);
+    body.appendChild(tr);
+  }
+}
+
+function updateFilesLede() {
+  const fid = $("files-model").value, f = train.furnaces.find((x) => x.furnace_id === fid);
+  $("files-lede-builtin").hidden = !!f; $("files-lede-furnace").hidden = !f;
+  if (!f) return;
+  const list = (cols) => cols.join(", ");
+  $("files-furnace-name").textContent = f.name;
+  $("files-furnace-sensor").textContent = list(f.required_columns.sensor);
+  $("files-furnace-si").textContent = list(f.required_columns.si);
+}
+
+function initTraining() {
+  $("train-upload").addEventListener("submit", readTrainingFiles);
+  $("train-map").addEventListener("submit", startTraining);
+  $("train-restart").addEventListener("click", () => { $("train-map").hidden = true; train.upload = null; $("train-upload").reset(); $("train-sensor").focus(); });
+  $("map-sensor-sheet").addEventListener("change", () => renderSensorSide(false));
+  $("map-si-sheet").addEventListener("change", () => renderSiSide(false));
+  $("map-sensor-time").addEventListener("change", () => {
+    const keep = new Set(selectedSensors()); renderSensorSide(false);
+    for (const cb of $("map-sensors").querySelectorAll("input")) cb.checked = keep.has(cb.value) || (!keep.size && cb.checked);
+    updateSensorCount();
+  });
+  $("map-all").addEventListener("click", () => { for (const cb of $("map-sensors").querySelectorAll("input")) cb.checked = true; updateSensorCount(); });
+  $("map-none").addEventListener("click", () => { for (const cb of $("map-sensors").querySelectorAll("input")) cb.checked = false; updateSensorCount(); });
+  $("report-use").addEventListener("click", () => {
+    if (!train.current) return;
+    selectTab("tab-files"); $("files-model").value = train.current.furnace_id; updateFilesLede(); $("tab-files").focus();
+  });
+  $("files-model").addEventListener("change", updateFilesLede);
+  refreshFurnaces();
 }
 
 /* ---------------------------------------------------------------- set-up */
@@ -378,23 +643,29 @@ function applyModelMeta(meta) {
   if (meta.interval_level) state.level = meta.interval_level;
 }
 
+const TABS = [["tab-replay", "panel-replay"], ["tab-files", "panel-files"], ["tab-train", "panel-train"]];
 function selectTab(which) {
-  for (const [tab, panel] of [["tab-replay", "panel-replay"], ["tab-files", "panel-files"]]) {
+  for (const [tab, panel] of TABS) {
     const on = tab === which;
     $(tab).setAttribute("aria-selected", on); $(tab).tabIndex = on ? 0 : -1; $(panel).hidden = !on;
   }
   stopPlayback(); showError("");
   state.measured = []; state.predicted = []; state.replay = null; state.xDomain = null; state.yMax = null;
   $("running").textContent = ""; setReadout(null); render();
+  if (which === "tab-train" && train.current && !$("train-report").hidden) showReport(train.current.furnace_id);   // put its chart back
 }
 
 async function init() {
-  for (const id of ["tab-replay", "tab-files"]) {
+  TABS.forEach(([id], i) => {
     $(id).addEventListener("click", () => selectTab(id));
     $(id).addEventListener("keydown", (e) => {
-      if (e.key === "ArrowRight" || e.key === "ArrowLeft") { const other = id === "tab-replay" ? "tab-files" : "tab-replay"; selectTab(other); $(other).focus(); }
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        const other = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length][0];
+        selectTab(other); $(other).focus();
+      }
     });
-  }
+  });
+  initTraining();
   $("replay-form").addEventListener("submit", startReplay);
   $("replay-skip").addEventListener("click", () => { if (state.replay) { stopPlayback(); revealTo(state.replay.rows.length); } });
   $("files-form").addEventListener("submit", predictFromFiles);

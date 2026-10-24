@@ -10,6 +10,7 @@ Environment variables
   SI_DEMO_MODEL   held-out demo model             (default model/si_pipeline_demo.pkl, made by train_final.py)
   SI_DEMO_DATA    dataset used by the demo replay (default data/1_blast_furnace_data_first_dataset.xlsx)
   SI_EXAMPLE      example request                 (default examples/sample_request.json)
+  SI_FURNACE_DIR  where furnace models and uploads are kept (default: the folder of SI_MODEL_PATH)
   HOST, PORT      bind address for `python app.py` (default 127.0.0.1, 5000)
   FLASK_DEBUG=1   Flask debug mode (development only; never combine with a public HOST)
 
@@ -23,6 +24,15 @@ Endpoints
   POST /api/predict/upload   multipart: sensor_file and si_file (CSV or Excel), optional query_time
   GET  /api/demo/info        is the held-out replay available, and for which period
   POST /api/demo/replay      JSON: start, casts  ->  held-out predictions next to the measured values
+
+  Other furnaces (furnace.py): train and validate the same recipe on another furnace's own history
+  POST   /api/furnaces/inspect             multipart: sensor_file, si_file -> columns and a suggested mapping
+  POST   /api/furnaces/train               JSON: upload_id, name, mapping -> 202, runs in the background
+  GET    /api/furnaces/<id>/job            progress of a training job
+  GET    /api/furnaces                     trained furnace models
+  GET    /api/furnaces/<id>                model card with the evaluation report and the test-period series
+  DELETE /api/furnaces/<id>                delete a furnace model
+  POST   /api/furnaces/<id>/predict/upload multipart: sensor_file, si_file (that furnace's own columns), query_time
 
 Security note: model files are pickles. Only load model files you created yourself.
 """
@@ -43,10 +53,11 @@ try:
     from si_pipeline import require_version
 except ImportError:
     raise SystemExit("Your si_pipeline.py is out of date: copy the latest si_pipeline.py from the project folder over yours.")
-require_version("1.3")
+require_version("1.4")
 from si_pipeline import SiPipeline, prepare_si_frame
+import furnace as fz
 
-MAX_BODY_BYTES = 16 * 1024 * 1024
+MAX_BODY_BYTES = 64 * 1024 * 1024    # a few years of another furnace's history
 MAX_SENSOR_ROWS = 5000          # JSON requests
 MAX_HISTORY_ROWS = 5000
 MAX_QUERIES = 500
@@ -81,7 +92,7 @@ def iso(t):
 
 
 def create_app(model_path=None, card_path=None, example_path=None, demo_model_path=None, demo_data_path=None,
-               preload_demo=False):
+               preload_demo=False, furnace_dir=None):
     app = Flask(__name__, static_folder=os.path.join(HERE, "static"), static_url_path="/static")
     app.config["MAX_CONTENT_LENGTH"] = MAX_BODY_BYTES
     model_path = model_path or os.environ.get("SI_MODEL_PATH", "model/si_pipeline_hybrid.pkl")
@@ -89,6 +100,7 @@ def create_app(model_path=None, card_path=None, example_path=None, demo_model_pa
     example_path = example_path or os.environ.get("SI_EXAMPLE", "examples/sample_request.json")
     demo_model_path = demo_model_path or os.environ.get("SI_DEMO_MODEL", "model/si_pipeline_demo.pkl")
     demo_data_path = demo_data_path or os.environ.get("SI_DEMO_DATA", "data/1_blast_furnace_data_first_dataset.xlsx")
+    furnace_root = furnace_dir or os.environ.get("SI_FURNACE_DIR") or (os.path.dirname(model_path) or ".")
 
     if not os.path.exists(model_path):
         raise RuntimeError(f"Model file not found: {model_path}. Create it with `python train_final.py`.")
@@ -102,14 +114,20 @@ def create_app(model_path=None, card_path=None, example_path=None, demo_model_pa
     demo_lock = threading.Lock()
 
     # ------------------------------------------------------------------ shared prediction step
-    def run_predictions(model, sensor, hist, queries):
+    def run_predictions(model, sensor, hist, queries, furnace_card=None):
+        kw = {}
+        if furnace_card:       # thresholds learned from that furnace's own history
+            kw = {"stale_hours": furnace_card["stale_hours"], "upset_level": furnace_card["upset_level"]}
         with lock:
-            res = model.predict_frame(sensor, queries, si_history=hist)
+            res = model.predict_frame(sensor, queries, si_history=hist, **kw)
         results = []
         for r in res.itertuples():
+            msgs = [m for m in r.messages.split("; ") if m]
+            if furnace_card:
+                msgs = [fz.translate_messages(m, furnace_card) for m in msgs]
             results.append({"time": iso(r.time), "prediction": num(r.prediction), "lower": num(r.lower),
                             "upper": num(r.upper), "interval_level": num(r.interval_level, 2), "status": r.status,
-                            "messages": [m for m in r.messages.split("; ") if m]})
+                            "messages": msgs})
         statuses = [x["status"] for x in results]
         if all(s == "no_prediction" for s in statuses):
             return results, "no_prediction", 422
@@ -325,6 +343,79 @@ def create_app(model_path=None, card_path=None, example_path=None, demo_model_pa
     if preload_demo:      # read the replay dataset in the background so the first replay does not stall for ~10 s
         threading.Thread(target=load_demo, name="demo-preload", daemon=True).start()
 
+    # ------------------------------------------------------------------ other furnaces
+    def upload_bytes(field, label):
+        f = request.files.get(field)
+        if f is None or not f.filename:
+            raise ApiError(400, "missing_file", f"Choose a file for the {label}")
+        return f.read(), f.filename
+
+    @app.route("/api/furnaces/inspect", methods=["POST"])
+    def furnace_inspect():
+        sb, sn = upload_bytes("sensor_file", "sensor history")
+        qb, qn = upload_bytes("si_file", "Si results")
+        t0 = time.time()
+        out = fz.inspect_upload(furnace_root, sb, sn, qb, qn)
+        log.info("furnace upload %s inspected in %.1f s (%s, %s)", out["upload_id"][:8], time.time() - t0, sn, qn)
+        return jsonify(out)
+
+    @app.route("/api/furnaces/train", methods=["POST"])
+    def furnace_train():
+        p = parse_json_request()
+        fid, ctx = fz.start_job(furnace_root, p.get("upload_id"), p.get("name"), p.get("mapping"))
+        threading.Thread(target=fz.run_training_job, args=(furnace_root, fid, ctx), name=f"train-{fid}", daemon=True).start()
+        log.info("furnace %s: training started", fid)
+        return jsonify({"furnace_id": fid, "status": "queued", "job_url": f"/api/furnaces/{fid}/job"}), 202
+
+    @app.route("/api/furnaces/<fid>/job")
+    def furnace_job(fid):
+        return jsonify(fz.job_status(furnace_root, fid))
+
+    @app.route("/api/furnaces")
+    def furnace_list():
+        return jsonify({"furnaces": fz.list_furnaces(furnace_root)})
+
+    @app.route("/api/furnaces/<fid>", methods=["GET"])
+    def furnace_card(fid):
+        _, fcard = fz.load_furnace(furnace_root, fid)
+        series = fz.read_json(os.path.join(fz.furnace_dir(furnace_root, fid), "test_series.json"), {})
+        return jsonify(dict(fcard, test_series=series))
+
+    @app.route("/api/furnaces/<fid>", methods=["DELETE"])
+    def furnace_delete(fid):
+        fz.delete_furnace(furnace_root, fid)
+        log.info("furnace %s deleted", fid)
+        return jsonify({"deleted": fid})
+
+    def furnace_sheet(sheets, part):
+        """The sheet named in the mapping, else the first one that has the time column."""
+        if part.get("sheet") in sheets:
+            return sheets[part["sheet"]]
+        return next((df for df in sheets.values() if part["time_col"] in df.columns), next(iter(sheets.values())))
+
+    @app.route("/api/furnaces/<fid>/predict/upload", methods=["POST"])
+    def furnace_predict(fid):
+        rid, t0 = uuid.uuid4().hex[:8], time.time()
+        fpipe, fcard = fz.load_furnace(furnace_root, fid)
+        mp = fcard["mapping"]
+        sb, sn = upload_bytes("sensor_file", "sensor file")
+        qb, qn = upload_bytes("si_file", "Si results file")
+        sensor_raw = furnace_sheet(fz.read_tables(sb, sn), mp["sensor"])
+        si_raw = furnace_sheet(fz.read_tables(qb, qn), mp["si"])
+        sensor, hist, _ = fz.apply_mapping(sensor_raw, si_raw, mp)
+        q = parse_query_times({"query_time": request.form.get("query_time", "")}, sensor)[0]
+        sensor = sensor[(sensor["dt"] <= q) & (sensor["dt"] > q - UPLOAD_SENSOR_WINDOW)]
+        if len(sensor) == 0:
+            raise ApiError(422, "no_sensor_data", "The sensor file has no readings in the 7 days before the chosen time")
+        results, overall, code = run_predictions(fpipe, sensor, hist, [q], furnace_card=fcard)
+        log.info("furnace %s upload %s: %d sensor rows -> %s (%.0f ms)", fid, rid, len(sensor), overall, (time.time() - t0) * 1000)
+        return jsonify({"request_id": rid, "status": overall, "unit": "wt% Si", "results": results,
+                        "context": {"si_history": si_context(hist, q), "sensor_rows_used": int(len(sensor)),
+                                    "sensor_from": iso(sensor["dt"].min()), "sensor_to": iso(sensor["dt"].max())},
+                        "model": {"name": fcard["name"], "furnace_id": fid, "trained_through": fcard["training_range"][1],
+                                  "interval_level": fcard["interval_level"], "typical_si_range": fcard["typical_si_range"],
+                                  "upset_level": fcard["upset_level"]}}), code
+
     # ------------------------------------------------------------------ info routes
     @app.route("/health")
     def health():
@@ -367,6 +458,13 @@ def create_app(model_path=None, card_path=None, example_path=None, demo_model_pa
         return Response(CONSOLE_HTML, mimetype="text/html")
 
     # ------------------------------------------------------------------ errors and headers
+    @app.errorhandler(fz.FurnaceError)
+    def furnace_error(e):
+        body = {"error": {"code": e.code, "message": e.message}}
+        if e.details:
+            body["error"]["details"] = e.details
+        return jsonify(body), e.status
+
     @app.errorhandler(ApiError)
     def api_error(e):
         body = {"error": {"code": e.code, "message": e.message}}

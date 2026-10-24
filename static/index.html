@@ -21,6 +21,7 @@
     <div class="mode-switch" role="tablist" aria-label="Data source">
       <button role="tab" id="tab-replay" aria-selected="true" aria-controls="panel-replay">Replay held-out casts</button>
       <button role="tab" id="tab-files" aria-selected="false" aria-controls="panel-files" tabindex="-1">Predict from my files</button>
+      <button role="tab" id="tab-train" aria-selected="false" aria-controls="panel-train" tabindex="-1">Train for another furnace</button>
     </div>
 
     <section id="panel-replay" role="tabpanel" aria-labelledby="tab-replay" class="controls">
@@ -43,10 +44,16 @@
     </section>
 
     <section id="panel-files" role="tabpanel" aria-labelledby="tab-files" class="controls" hidden>
-      <p class="lede">Use your own readings. The sensor file needs a <code>dt</code> column and the 27 process variables
+      <p class="lede" id="files-lede-builtin">Use your own readings. The sensor file needs a <code>dt</code> column and the 27 process variables
         (<span id="sensor-cols">Fb, Ph, Pc, …</span>), with at least 24 hourly rows before the chosen time.
         The Si file needs <code>dt</code> and <code>Si</code>, with at least 3 results before that time. CSV or Excel.</p>
+      <p class="lede" id="files-lede-furnace" hidden>Files in <span id="files-furnace-name"></span>’s own layout. The sensor file needs
+        <span id="files-furnace-sensor"></span>, with at least 24 hours of readings before the chosen time. The Si file needs
+        <span id="files-furnace-si"></span>, with at least 3 results before that time.</p>
       <form id="files-form" class="control-row">
+        <label>Model
+          <select id="files-model"><option value="">Built-in model (this furnace)</option></select>
+        </label>
         <label>Sensor readings
           <input type="file" id="sensor-file" accept=".csv,.xlsx,.xlsm" required>
         </label>
@@ -59,6 +66,103 @@
         </label>
         <button type="submit" class="primary" id="files-go">Predict next cast</button>
       </form>
+    </section>
+
+    <section id="panel-train" role="tabpanel" aria-labelledby="tab-train" class="controls" hidden>
+      <p class="lede">A model trained on one furnace does not carry over to another, so each furnace gets its own model.
+        Upload that furnace’s history, tell the app which columns are which, and it trains the same recipe and checks it the way
+        the paper does: in time order, on a final period the model never saw, against simply repeating the last lab result.</p>
+
+      <form id="train-upload" class="control-row step-block">
+        <h2 class="step-title"><span class="step-no">1</span> Upload the history</h2>
+        <label>Sensor readings
+          <input type="file" id="train-sensor" accept=".csv,.xlsx,.xlsm" required>
+        </label>
+        <label>Si lab results
+          <input type="file" id="train-si" accept=".csv,.xlsx,.xlsm" required aria-describedby="train-si-help">
+          <span id="train-si-help" class="hint">May be the same Excel file</span>
+        </label>
+        <button type="submit" class="primary" id="train-read">Read files</button>
+        <p class="hint step-note">Hourly or finer readings over at least several months, and at least 1,000 Si results. Readings are
+          reduced to hourly medians. Up to 64 MB per upload.</p>
+      </form>
+
+      <form id="train-map" class="step-block" hidden>
+        <h2 class="step-title"><span class="step-no">2</span> Match the columns</h2>
+        <div class="map-grid">
+          <fieldset>
+            <legend>Sensor file <span id="map-sensor-file" class="file-name"></span></legend>
+            <div class="control-row">
+              <label id="map-sensor-sheet-wrap">Sheet <select id="map-sensor-sheet"></select></label>
+              <label>Time column <select id="map-sensor-time"></select></label>
+              <label class="check"><input type="checkbox" id="map-sensor-dayfirst"> Day first (31/12/2016)</label>
+            </div>
+            <p id="map-sensor-info" class="hint"></p>
+            <div class="sensor-head">
+              <span id="map-sensor-count" class="field-label">Sensors</span>
+              <button type="button" class="small" id="map-all">Select all</button>
+              <button type="button" class="small" id="map-none">Select none</button>
+            </div>
+            <div id="map-sensors" class="sensor-list" role="group" aria-labelledby="map-sensor-count"></div>
+            <label class="inline-label">Blast flow column
+              <select id="map-blast"></select>
+              <span class="hint">Zero or below marks the blast as off. Optional.</span>
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>Si file <span id="map-si-file" class="file-name"></span></legend>
+            <div class="control-row">
+              <label id="map-si-sheet-wrap">Sheet <select id="map-si-sheet"></select></label>
+              <label>Time column <select id="map-si-time"></select></label>
+              <label>Si column <select id="map-si-value"></select></label>
+              <label class="check"><input type="checkbox" id="map-si-dayfirst"> Day first</label>
+            </div>
+            <p id="map-si-info" class="hint"></p>
+            <label class="inline-label">Furnace name
+              <input type="text" id="map-name" maxlength="60" required placeholder="e.g. Furnace 2">
+            </label>
+          </fieldset>
+        </div>
+        <div class="control-row">
+          <button type="submit" class="primary" id="train-go">Train and validate</button>
+          <button type="button" id="train-restart">Choose other files</button>
+        </div>
+      </form>
+
+      <div id="train-progress" class="step-block" hidden>
+        <h2 class="step-title"><span class="step-no">3</span> Training and validating</h2>
+        <progress id="train-bar" max="1" value="0"></progress>
+        <p id="train-step" class="hint" aria-live="polite"></p>
+      </div>
+
+      <div id="train-report" class="step-block" hidden>
+        <h2 class="step-title" id="report-title">Result</h2>
+        <p id="report-verdict" class="verdict"></p>
+        <div class="table-scroll report-table">
+          <table>
+            <thead><tr><th scope="col"></th><th scope="col">Held-out MAE (wt%)</th><th scope="col">Held-out R²</th>
+              <th scope="col">Within ±0.1</th><th scope="col">Cross-validated MAE</th></tr></thead>
+            <tbody id="report-body"></tbody>
+          </table>
+        </div>
+        <ul id="report-facts" class="facts"></ul>
+        <div class="control-row">
+          <button type="button" class="primary" id="report-use">Predict with this model</button>
+        </div>
+        <p class="hint">The chart below shows the held-out period: what the model would have predicted, cast by cast, using only
+          data from before each cast.</p>
+      </div>
+
+      <div class="step-block" id="furnace-list-wrap" hidden>
+        <h2 class="step-title">Trained furnace models</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th scope="col">Furnace</th><th scope="col">Data up to</th><th scope="col">Held-out MAE vs repeating the last result</th>
+              <th scope="col">Verdict</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody id="furnace-body"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <p id="error" class="error" role="alert" hidden></p>
@@ -111,7 +215,8 @@
 
     <footer class="limits">
       <h2>Before you rely on a prediction</h2>
-      <p>The model was trained on one furnace. Predictions follow the previous lab results closely and underestimate upsets:
+      <p>The built-in model was trained on one furnace; a model trained for another furnace is only as good as its own
+        held-out check, shown in its report. Predictions follow the previous lab results closely and underestimate upsets:
         when silicon rises above about 1.2 wt% the interval usually misses. Intervals are also less reliable when the last lab
         result is more than a few hours old. Use the prediction as a guide next to the lab result, not as a control setpoint.</p>
       <p><a href="/console">Developer console</a> for the raw API.</p>

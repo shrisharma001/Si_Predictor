@@ -17,7 +17,8 @@ Stages
 """
 from __future__ import annotations
 
-__version__ = "1.3"   # 1.3: hybrid model, conformal intervals, predict_frame (needed by train_final, app, tests)
+__version__ = "1.4"   # 1.4: optional hourly resampling and blast-off column (other furnaces, furnace.py)
+                      # 1.3: hybrid model, conformal intervals, predict_frame (needed by train_final, app, tests)
 
 from dataclasses import dataclass, field
 
@@ -76,7 +77,8 @@ class Config:
     n_history: int = 3              # number of previous Si lab results used
     align_tolerance_hours: float = 1.0
     warmup_hours: int = 24          # drop samples without enough sensor history
-    blast_off_col: str = "Fb"       # Fb <= 0 marks a shutdown / blast-off state
+    blast_off_col: str | None = "Fb"   # Fb <= 0 marks a shutdown / blast-off state; None = no such column
+    resample_hourly: bool = False   # True: reduce readings to hourly medians first (other furnaces; see prepare_sensor_frame)
 
 
 # ----------------------------------------------------------------------------
@@ -166,27 +168,35 @@ class SensorCleaner:
 # 2. SENSOR FEATURES (hourly frame indexed by time)
 # ----------------------------------------------------------------------------
 def prepare_sensor_frame(sensor_df, cfg):
+    """Time-indexed sensor frame. With cfg.resample_hourly the readings are reduced to hourly medians on a regular grid.
+    Each bin is labelled by its END and closed on the right, so the row at 10:00 holds readings from (09:00, 10:00]
+    and never anything recorded after the query time. Empty hours become NaN and are handled by the cleaner."""
     s = sensor_df.copy()
     s[cfg.time_col] = pd.to_datetime(s[cfg.time_col])
     s = s.sort_values(cfg.time_col).drop_duplicates(cfg.time_col)
-    return s.set_index(cfg.time_col)
+    s = s.set_index(cfg.time_col)
+    if getattr(cfg, "resample_hourly", False):
+        num = s[cfg.sensors].apply(pd.to_numeric, errors="coerce")
+        s = num.resample("1h", label="right", closed="right").median()
+    return s
 
 
 def build_sensor_features(clean, raw, cfg, use_lags, use_roll):
     """clean/raw: hourly frames with a regular 1-hour index. Past data only."""
-    f = clean[cfg.sensors].copy()
-    f["blast_off"] = (pd.to_numeric(raw[cfg.blast_off_col], errors="coerce") <= 0).astype(float)
+    cols = {c: clean[c] for c in cfg.sensors}
+    if cfg.blast_off_col:
+        cols["blast_off"] = (pd.to_numeric(raw[cfg.blast_off_col], errors="coerce") <= 0).astype(float)
     if use_lags:
-        for lag, cols in cfg.lag_spec.items():
-            for c in cols:
-                f[f"{c}_lag{lag}"] = clean[c].shift(lag)
+        for lag, names in cfg.lag_spec.items():
+            for c in names:
+                cols[f"{c}_lag{lag}"] = clean[c].shift(lag)
     if use_roll:
         for c in cfg.roll_features:
             for w in cfg.roll_mean_windows:
-                f[f"{c}_rm{w}"] = clean[c].rolling(w, min_periods=w).mean()
+                cols[f"{c}_rm{w}"] = clean[c].rolling(w, min_periods=w).mean()
             for w in cfg.roll_std_windows:
-                f[f"{c}_rs{w}"] = clean[c].rolling(w, min_periods=w).std()
-    return f
+                cols[f"{c}_rs{w}"] = clean[c].rolling(w, min_periods=w).std()
+    return pd.DataFrame(cols, index=clean.index)       # built in one go (same column order as before)
 
 
 # ----------------------------------------------------------------------------
@@ -452,7 +462,7 @@ class SiPipeline:
             if not ok[i]:
                 if pos < 0 or (t - raw.index[pos]) > pd.Timedelta(hours=cfg.align_tolerance_hours):
                     msgs.append(f"no sensor reading within {cfg.align_tolerance_hours:g} h before the query")
-                elif self.use_history and d[["si_prev1", "si_prev2", "si_prev3"][:cfg.n_history]].iloc[i].isna().any():
+                elif self.use_history and d[[f"si_prev{k}" for k in range(1, cfg.n_history + 1)]].iloc[i].isna().any():
                     msgs.append(f"fewer than {cfg.n_history} previous Si results are available")
                 else:
                     msgs.append(f"not enough sensor history (need about {cfg.warmup_hours} hourly rows before the query)")
@@ -468,7 +478,7 @@ class SiPipeline:
                           and (vals[c] < self.cleaner_.lo_[c] or vals[c] > self.cleaner_.hi_[c])]
                 if beyond:
                     msgs.append("outside the range seen in training (clipped): " + ", ".join(beyond[:6]))
-                if vals[cfg.blast_off_col] <= 0:
+                if cfg.blast_off_col and vals[cfg.blast_off_col] <= 0:
                     msgs.append("blast appears to be off (shutdown state)")
             if self.use_history:
                 if d["hours_since_prev"].iloc[i] > stale_hours:

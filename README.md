@@ -12,8 +12,7 @@ features, models, evaluation), served by a Flask API with an operator interface 
   - sheet `Si`: 16,589 irregularly timed Si lab results
   - sheet `symbols`: variable descriptions
 - Source: *Process data collected by blast-furnace sensors*, Mendeley Data,
-  DOI 10.17632/6d7jbc7tb5.1
-  <!-- (Version 1, 15 Sep 2025; the description matches: 26 sensors plus a computed ore-to-coke ratio, a raw file and a validated, class-labelled file). Check the licence on the page before publishing. -->
+  DOI 10.17632/6d7jbc7tb5.1 (Version 1, 15 Sep 2025; the description matches: 26 sensors plus a computed ore-to-coke ratio, a raw file and a validated, class-labelled file). Check the licence on the page before publishing.
 - Period: January 2013 to May 2016.
 
 ## Setup
@@ -42,7 +41,10 @@ mkdir -p data model results
 | `run_gru.py` | GRU baseline (TensorFlow) under the same protocol; several independent runs, reports mean and spread |
 | `train_final.py` | Trains the live model on all data (hybrid + 90 % conformal intervals) into `model/si_pipeline_hybrid.pkl` and `model/model_card.json`, and a held-out demo copy trained on the development period only into `model/si_pipeline_demo.pkl` and `model/model_card_demo.json` (`--demo-only` builds just the demo copy) |
 | `test_pipeline.py` | 12 checks: the pipeline reproduces the experiments (MAE, interval coverage, width), input validation, warnings, save/load, coverage with and without refitting |
-| `app.py` | Flask API and operator interface: `/` (interface), `/api/predict` (JSON), `/api/predict/upload` (CSV/Excel files), `/api/demo/info` and `/api/demo/replay` (held-out replay), `/health`, `/api/model`, `/api/example`, `/console` (raw JSON console) |
+| `app.py` | Flask API and operator interface: `/` (interface), `/api/predict` (JSON), `/api/predict/upload` (CSV/Excel files), `/api/demo/info` and `/api/demo/replay` (held-out replay), `/api/furnaces/...` (train and use models for other furnaces), `/health`, `/api/model`, `/api/example`, `/console` (raw JSON console) |
+| `furnace.py` | Training for another furnace: reads that furnace's files, maps its column names, checks the data, runs the paper's time-ordered evaluation (3 CV folds + held-out last 15 %, against persistence, with a block-bootstrap test) and saves a model with a report (see "Other furnaces") |
+| `test_furnace.py` | 38 checks for `furnace.py` and its routes on a synthetic furnace (no dataset needed): date formats, column mapping, resampling, time order of the folds, leakage, errors for unusable data |
+| `make_furnace_example.py` | Writes `data/furnace_b_sensors.csv` and `data/furnace_b_si.csv`: **our own data reformatted** with other column names, fewer sensors and day-first dates, for trying the training tab (not a second furnace) |
 | `static/` | The operator interface: `index.html`, `app.css`, `app.js` (no external libraries; fonts fall back to system fonts offline) |
 | `make_sample_request.py` | Writes `examples/sample_request.json` (72 hourly sensor rows, 10 previous Si results, a query time) |
 | `test_api.py` | 56 checks: JSON API, file uploads (CSV, Excel, mixed timestamp styles), every validation error, data-quality handling, the demo replay, the interface files, and three leakage checks (future lab results, future sensor rows, replay consistency) |
@@ -90,6 +92,8 @@ python train_final.py              # live model + held-out demo model (both need
 python test_pipeline.py            # 12 checks, a few minutes
 python make_sample_request.py
 python test_api.py                 # 56 checks
+python test_furnace.py             # 38 checks, about 10 s
+python make_furnace_example.py     # optional: example files for the "Train for another furnace" tab
 python app.py                      # open http://127.0.0.1:5000
 ```
 
@@ -103,6 +107,9 @@ python app.py                      # open http://127.0.0.1:5000
 | `Replay is not available` in the interface | The demo model or the dataset is missing: run `python train_final.py --demo-only` and keep the dataset in `data/`. |
 | The replay button says `Loading replay data…` for about 10 s after start-up | Normal: the server reads the 7 MB dataset once in the background. Open the page a little before the demo. |
 | An uploaded Excel file is slow | Excel parsing takes several seconds for a full year of data; CSV files are much faster. |
+| Training for another furnace says "Some sensors have no reading in more than half of the hours" | Those columns are highlighted in the sensor list; deselect them and train again. |
+| A furnace's dates look shifted by months, or "do not overlap the sensor readings" | The day-first setting is wrong for that file. The app detects it from the whole column, but dates where every day is 12 or less are ambiguous: tick or untick "Day first". |
+| "Another furnace model is being trained" | One training job runs at a time (it uses all CPU cores). Wait for it; a job interrupted by a restart is released after 20 minutes. |
 
 ## Evaluation protocol
 
@@ -180,8 +187,9 @@ Full table: `results/consolidated_results.csv`. The GRU row is the mean of 5 ind
 
 ## What to commit
 
-Commit the `.py` files, `templates/`, `requirements.txt`, `README.md`, and the small `results/`
-CSVs and `fig_*.png`. Do not commit `data/`, `model/*.pkl`, `venv/` or `__pycache__/`.
+Commit the `.py` files, `static/`, `examples/`, the requirements files, the Docker files, `README.md`, `paper/` (without
+`.docx`/`.pdf`), and the small `results/` CSVs and `fig_*.png`. `.gitignore` keeps out `data/` (including the Furnace B example
+files), `model/` and `model_docker/` (models, furnace models and their uploads), `venv/` and `__pycache__/`.
 
 ## Paper materials (`paper/`)
 - `paper_numbers.md` generated numbers with their source files; `references.bib` and `REFERENCES_CHECK.md` the verified bibliography and what is still unconfirmed; `paper_outline.md` titles, claims, section plan and draft Related Work, Data and Protocol text.
@@ -202,8 +210,37 @@ the replay data loads in the background at start-up.
   This uses the live model.
 - The readout shows the prediction, its interval against the typical range (middle 80 % of past casts, 0.36 to 0.61 wt%), and the status
   with plain-language warnings. "Show the numbers" gives a table of everything on the chart.
+- **Train for another furnace.** See "Other furnaces" below.
 - Seen in the replay: thermocouple `Tp4` reads about 3,300 °C for long stretches of 2016, which is a sensor failure. The cleaner replaces
   those readings, and the interface reports it as a warning.
+
+## Other furnaces
+A model trained on one furnace does not transfer to another, so the deployable part is the **pipeline**: each furnace gets its own
+model, trained and checked on its own history. The "Train for another furnace" tab does this in four steps:
+
+1. **Upload** the furnace's sensor history and Si lab results (CSV or Excel; one workbook with two sheets works too). Any column
+   names, readings hourly or finer (10-minute data is reduced to hourly medians; each hour holds readings from the hour *before* its
+   time stamp, so nothing after a cast is used), at least 1,000 Si results inside the sensor period. Up to 64 MB per upload.
+2. **Match the columns.** The app suggests the time columns, the Si column, the sensors (every numeric column) and a blast-flow column,
+   and detects day-first dates by scanning the whole column. Correct anything that is wrong and name the furnace.
+3. **Train and validate** (about 10 s for two years of hourly data). Same fixed recipe as the paper, nothing tuned: hourly medians,
+   rolling mean/std of every selected sensor, the 3 previous Si results, Ridge + XGBoost on residuals, 90 % conformal intervals. The
+   last 15 % of samples are held out; the first 85 % give three expanding-window CV folds; the cleaner and model are refitted inside
+   every fold.
+4. **Report**: a verdict against "repeat the last lab result" with a paired block-bootstrap test (good / not clearly better / not
+   better), MAE, R² and share within ±0.1 wt% for the model, persistence and the training mean, interval coverage, the sensors whose
+   readings were replaced most often, and the held-out period on the chart. "Predict with this model" switches to the files tab with
+   that furnace selected; its files then use the furnace's own column names. The upset and stale-result warnings use thresholds from
+   that furnace's history (top 0.5 % of Si; four times the median gap between lab results, at least 6 h).
+
+Models are saved under `model/furnaces/<id>/` (`pipeline.pkl`, `card.json` with the full report, `test_series.json`); parsed uploads
+under `model/uploads/` are deleted after 6 hours. One training job runs at a time; progress lives in `job.json`, so it works with
+several gunicorn workers.
+
+**For the demo:** `python make_furnace_example.py` writes a "Furnace B" file pair. It is our own furnace's last two years with other
+column names, 19 of the 27 sensors and day-first dates, so it shows that the mapping and evaluation work with another plant's file
+layout. It is not evidence that the method transfers to a different furnace; only a second furnace's data can show that. On these files
+the model reaches a held-out MAE of 0.081 wt% against 0.097 for persistence (January to May 2016).
 
 ## Docker
 The container serves the API and interface with gunicorn. The dataset and the models are not part of the image: `./data` is
@@ -218,7 +255,8 @@ docker compose up                      # open http://localhost:8000 ; Ctrl+C to 
 ./docker_smoke_test.sh                 # optional: builds, trains, tests and checks the running service
 ```
 - If `id -u` is not 1000, prefix the commands with `HOST_UID=$(id -u) HOST_GID=$(id -g)` so the model files belong to you.
-- `docker compose run --rm si test` runs the 56 API checks inside the container.
+- `docker compose run --rm si test` runs the 56 API checks and the 38 furnace checks inside the container.
+- Furnace models trained in the container's interface are saved in `./model_docker/furnaces/` and survive restarts.
 - The port is published on 127.0.0.1 only, so the demo is reachable from this computer only.
 - `./model_docker` (container) and `./model` (your computer) are separate on purpose: each set is trained with the libraries that load it.
 - What was tested: the Docker Hub registry was not reachable from the authoring environment, so the image itself was not built
@@ -245,7 +283,7 @@ Start: `python train_final.py` (once), `python make_sample_request.py` (once), t
 - Response: `status` (`ok`, `warning`, `partial`, `no_prediction`), and per query `prediction`, `lower`, `upper`, `interval_level` (0.9), `status`, `messages`.
 - HTTP codes: 200 predictions made; 400 invalid input (the body names the problem); 413 body too large; 415 not JSON; 422 no prediction possible (for example fewer than 24 hourly rows or fewer than 3 previous results).
 - Messages warn about: replaced fault readings, values outside the training range, a previous Si result older than 6 h, a previous result above 1.2 (upsets), blast off.
-- Limits: 8 MB body, 5,000 sensor rows, 5,000 history rows, 500 query times.
+- Limits: 64 MB body, 5,000 sensor rows, 5,000 history rows, 500 query times.
 
 Operating notes
 - Debug mode is off unless `FLASK_DEBUG=1`; the default bind address is 127.0.0.1. Never run debug mode on a public address.
@@ -253,4 +291,9 @@ Operating notes
 - The model file is a pickle: load only files you created. It is gitignored; decide where it lives (a release artifact, a storage bucket, or built on the server with `train_final.py`) and keep the library versions identical to the ones that trained it.
 - `POST /api/predict/upload` takes multipart form fields `sensor_file`, `si_file` and optional `query_time`; files are trimmed to the 7 days before the query time, and rows after it are ignored.
 - `POST /api/demo/replay` takes `{"start": "2016-03-10T00:00", "casts": 48}` and returns, per cast, the prediction, interval, measured value and persistence value, plus summary MAE and coverage.
+- Other furnaces: `POST /api/furnaces/inspect` (multipart `sensor_file`, `si_file`) returns the sheets, column profiles and a suggested
+  mapping with an `upload_id`; `POST /api/furnaces/train` with `{"upload_id", "name", "mapping"}` answers 202 and trains in the
+  background; poll `GET /api/furnaces/<id>/job`; then `GET /api/furnaces/<id>` (report and held-out series), `GET /api/furnaces`,
+  `DELETE /api/furnaces/<id>`, and `POST /api/furnaces/<id>/predict/upload` (multipart, the furnace's own columns). 409 means a job
+  is already running; 410 means the upload expired.
 - For the local demo, authentication is not needed. Before any cloud deployment (planned for next semester), add authentication, rate limiting and a decision on where model files are stored.
