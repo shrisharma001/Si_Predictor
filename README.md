@@ -48,9 +48,9 @@ mkdir -p data model results
 | `health.py` | Model health (drift) checks: rolling MAE against persistence, interval coverage and the share of casts with replaced sensor readings; alert periods and a monthly table (see "Model health") |
 | `test_health.py` | 21 checks: alerts land where problems were planted in synthetic series, the demo route flags the January 2016 upset and the Tp4 failure, the furnace route matches its training report |
 | `make_furnace_example.py` | Writes `data/furnace_b_sensors.csv` and `data/furnace_b_si.csv`: **our own data reformatted** with other column names, fewer sensors and day-first dates, for trying the training tab (not a second furnace) |
-| `static/` | The operator interface: `index.html`, `app.css`, `app.js` (no external libraries; fonts fall back to system fonts offline) |
+| `static/` | The operator interface: `index.html`, `app.css`, `app.js` (no external libraries), and `fonts/` with the Geist typeface (SIL Open Font License, `GEIST-LICENSE.txt`) so the page looks the same offline. Light and dark themes; the toggle is remembered per browser |
 | `make_sample_request.py` | Writes `examples/sample_request.json` (72 hourly sensor rows, 10 previous Si results, a query time) |
-| `test_api.py` | 56 checks: JSON API, file uploads (CSV, Excel, mixed timestamp styles), every validation error, data-quality handling, the demo replay, the interface files, and three leakage checks (future lab results, future sensor rows, replay consistency) |
+| `test_api.py` | 57 checks: JSON API, file uploads (CSV, Excel, mixed timestamp styles), every validation error, data-quality handling, the demo replay, the interface files, and three leakage checks (future lab results, future sensor rows, replay consistency) |
 | `Dockerfile`, `docker-entrypoint.sh`, `docker-compose.yml`, `.dockerignore` | Container for the API and interface; the start-up script has `train`, `serve` and `test` commands (see "Docker") |
 | `requirements-docker.txt` | Exact library versions for the image (Python 3.12, CPU-only XGBoost) |
 | `docker_smoke_test.sh` | Builds the image and checks the whole container workflow on your machine |
@@ -94,7 +94,7 @@ python build_paper_numbers.py      # last; lists any missing result file and the
 python train_final.py              # live model + held-out demo model (both needed by the interface)
 python test_pipeline.py            # 12 checks, a few minutes
 python make_sample_request.py
-python test_api.py                 # 56 checks
+python test_api.py                 # 57 checks
 python test_furnace.py             # 38 checks, about 10 s
 python test_health.py              # 21 checks
 python make_furnace_example.py     # optional: example files for the "Train for another furnace" tab
@@ -277,7 +277,7 @@ docker compose up                      # open http://localhost:8000 ; Ctrl+C to 
 ./docker_smoke_test.sh                 # optional: builds, trains, tests and checks the running service
 ```
 - If `id -u` is not 1000, prefix the commands with `HOST_UID=$(id -u) HOST_GID=$(id -g)` so the model files belong to you.
-- `docker compose run --rm si test` runs the 56 API checks, the 38 furnace checks and the 21 model-health checks inside the container.
+- `docker compose run --rm si test` runs the 57 API checks, the 38 furnace checks and the 21 model-health checks inside the container.
 - Furnace models trained in the container's interface are saved in `./model_docker/furnaces/` and survive restarts.
 - The port is published on 127.0.0.1 only, so the demo is reachable from this computer only.
 - `./model_docker` (container) and `./model` (your computer) are separate on purpose: each set is trained with the libraries that load it.

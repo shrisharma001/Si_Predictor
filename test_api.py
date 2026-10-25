@@ -178,6 +178,14 @@ with pd.ExcelWriter(xb) as w:
 xbytes = xb.getvalue()
 r = upload(xbytes, xbytes, "plant.xlsx", "plant.xlsx")
 check("one Excel workbook with both sheets works for both fields", r.status_code == 200 and abs(r.get_json()["results"][0]["prediction"] - res["prediction"]) < 1e-9)
+xb = io.BytesIO()
+with pd.ExcelWriter(xb) as w:      # the dataset's own layout: a list of variable names comes first and has an 'Fb' column
+    pd.DataFrame({"Fb": ["Ph", "Pc"], "Blast flowrate, m3/min": ["Hot blast pressure", "Cold blast pressure"]}).to_excel(w, sheet_name="symbols", index=False)
+    sens_df.to_excel(w, sheet_name="data", index=False)
+    hist_df.to_excel(w, sheet_name="Si", index=False)
+r = upload(xb.getvalue(), xb.getvalue(), "dataset.xlsx", "dataset.xlsx")
+check("a workbook whose first sheet only lists variable names still finds the data sheet",
+      r.status_code == 200 and abs(r.get_json()["results"][0]["prediction"] - res["prediction"]) < 1e-9, r.status_code)
 fut = sens_df.copy(); fut["dt"] = pd.to_datetime(fut["dt"]) + pd.Timedelta(hours=72); fut[pipe.cfg.sensors] = 99999.0
 mix = sens_df.copy(); mix["dt"] = pd.to_datetime(mix["dt"]).dt.strftime("%Y-%m-%d %H:%M:%S"); mix.loc[::2, "dt"] = sens_df.loc[::2, "dt"]
 r = upload(mix.to_csv(index=False).encode(), csv_h)

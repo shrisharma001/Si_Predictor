@@ -212,7 +212,9 @@ def create_app(model_path=None, card_path=None, example_path=None, demo_model_pa
                 df = pd.read_csv(io.BytesIO(raw))
             elif name.endswith(".xlsx") or name.endswith(".xlsm"):
                 xl = pd.ExcelFile(io.BytesIO(raw))
-                sheet = next((s for s in xl.sheet_names if required[1] in xl.parse(s, nrows=0).columns), xl.sheet_names[0])
+                # the sheet with the most required columns (a workbook may also hold e.g. a list of variable names)
+                hits = [sum(c in set(map(str, xl.parse(s, nrows=0).columns)) for c in required) for s in xl.sheet_names]
+                sheet = xl.sheet_names[int(np.argmax(hits))]
                 df = xl.parse(sheet)
             else:
                 raise ApiError(400, "unsupported_file_type", f"The {label} must be a .csv or .xlsx file")

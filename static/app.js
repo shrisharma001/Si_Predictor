@@ -85,24 +85,24 @@ function drawGauge(p) {
   const svg = $("gauge");
   svg.replaceChildren();
   const cap = $("gauge-caption");
-  const W = svg.clientWidth || 320, H = 76, padL = 8, padR = 8, y0 = 30, h = 16;
+  const W = svg.clientWidth || 320, H = 76, padL = 8, padR = 8, y0 = 32, h = 12;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   if (!p || p.v === null) { cap.textContent = ""; return; }
   const hiVal = Math.max(1.0, (p.hi ?? p.v) + 0.1, (p.actual ?? 0) + 0.1);
   const max = Math.ceil(hiVal * 5) / 5;
   const x = (v) => padL + (Math.max(0, Math.min(v, max)) / max) * (W - padL - padR);
-  el("rect", { x: padL, y: y0, width: W - padL - padR, height: h, fill: "#e9eeea", rx: 2 }, svg);
-  if (state.typical) el("rect", { x: x(state.typical[0]), y: y0, width: x(state.typical[1]) - x(state.typical[0]), height: h, fill: "var(--typical)", stroke: "#a9bfa6" }, svg);
-  if (p.lo !== null && p.hi !== null) el("rect", { x: x(p.lo), y: y0 + 3, width: Math.max(2, x(p.hi) - x(p.lo)), height: h - 6, fill: "var(--band)", stroke: "var(--band-edge)" }, svg);
-  el("line", { x1: x(p.v), x2: x(p.v), y1: y0 - 6, y2: y0 + h + 6, stroke: "var(--predicted)", "stroke-width": 3 }, svg);
+  el("rect", { x: padL, y: y0, width: W - padL - padR, height: h, fill: "var(--gauge-track)", rx: h / 2 }, svg);
+  if (state.typical) el("rect", { x: x(state.typical[0]), y: y0, width: x(state.typical[1]) - x(state.typical[0]), height: h, fill: "var(--typical)", stroke: "var(--typical-edge)", rx: 2 }, svg);
+  if (p.lo !== null && p.hi !== null) el("rect", { x: x(p.lo), y: y0 + 2, width: Math.max(2, x(p.hi) - x(p.lo)), height: h - 4, rx: 3, fill: "var(--band)", stroke: "var(--band-edge)" }, svg);
+  el("line", { x1: x(p.v), x2: x(p.v), y1: y0 - 7, y2: y0 + h + 7, stroke: "var(--predicted)", "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
   if (p.actual !== undefined && p.actual !== null) {
     const ax = x(p.actual);
-    el("path", { d: `M${ax - 6},${y0 - 14} L${ax + 6},${y0 - 14} L${ax},${y0 - 5} Z`, fill: "var(--measured)" }, svg);
+    el("path", { d: `M${ax - 5},${y0 - 14} L${ax + 5},${y0 - 14} L${ax},${y0 - 6} Z`, fill: "var(--measured)", "stroke-linejoin": "round" }, svg);
   }
   const step = max > 1.6 ? 0.5 : 0.2;
   for (let v = 0; v <= max + 1e-9; v += step) {
-    el("line", { x1: x(v), x2: x(v), y1: y0 + h, y2: y0 + h + 4, stroke: "#8a9690" }, svg);
-    svgText(svg, x(v), y0 + h + 17, fmtNum(v, 1), "axis-text", v === 0 ? "start" : (v + step > max + 1e-9 ? "end" : "middle")).setAttribute("style", "fill:var(--ink-2);font:12px var(--font)");
+    el("line", { x1: x(v), x2: x(v), y1: y0 + h + 3, y2: y0 + h + 7, stroke: "var(--gauge-tick)" }, svg);
+    svgText(svg, x(v), y0 + h + 20, fmtNum(v, 1), "axis-text", v === 0 ? "start" : (v + step > max + 1e-9 ? "end" : "middle")).setAttribute("style", "fill:var(--ink-3);font:450 11.5px var(--font);font-variant-numeric:tabular-nums");
   }
   let txt = `${Math.round(state.level * 100)} % interval ${fmtNum(p.lo)} to ${fmtNum(p.hi)} wt%.`;
   if (state.typical) txt += ` Typical range ${fmtNum(state.typical[0])} to ${fmtNum(state.typical[1])} (shaded).`;
@@ -377,7 +377,7 @@ async function predictFromFiles(ev) {
 
 /* ---------------------------------------------------------------- another furnace */
 const train = { upload: null, polling: null, furnaces: [], current: null };
-const fmtPct = (v, d = 0) => (v === null || v === undefined ? "–" : `${(v * 100).toFixed(d)} %`);
+const fmtPct = (v, d = 0) => (v === null || v === undefined ? "–" : `${(v * 100).toFixed(d)}\u00a0%`);   // no line break before %
 const fmtDate = (s) => (s ? new Date(s).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–");
 function option(sel, value, text, selected = false) {
   const o = document.createElement("option"); o.value = value; o.textContent = text; o.selected = selected; sel.appendChild(o); return o;
@@ -750,6 +750,16 @@ function applyModelMeta(meta) {
   if (meta.interval_level) state.level = meta.interval_level;
 }
 
+function moveThumb(animate = true) {
+  const sw = document.querySelector(".mode-switch"), thumb = sw && sw.querySelector(".tab-thumb");
+  const on = sw && sw.querySelector('[aria-selected="true"]');
+  if (!thumb || !on) return;
+  if (!animate) thumb.style.transition = "none";
+  thumb.style.width = `${on.offsetWidth}px`; thumb.style.height = `${on.offsetHeight}px`;
+  thumb.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`;
+  sw.classList.add("has-thumb");
+  if (!animate) requestAnimationFrame(() => { thumb.style.transition = ""; });
+}
 const TABS = [["tab-replay", "panel-replay"], ["tab-files", "panel-files"], ["tab-train", "panel-train"], ["tab-health", "panel-health"]];
 function selectTab(which) {
   for (const [tab, panel] of TABS) {
@@ -757,6 +767,7 @@ function selectTab(which) {
     $(tab).setAttribute("aria-selected", on); $(tab).tabIndex = on ? 0 : -1; $(panel).hidden = !on;
   }
   document.body.dataset.tab = which;
+  moveThumb();
   stopPlayback(); showError("");
   state.measured = []; state.predicted = []; state.replay = null; state.xDomain = null; state.yMax = null;
   $("running").textContent = ""; setReadout(null); render();
@@ -764,7 +775,98 @@ function selectTab(which) {
   if (which === "tab-health") loadHealth();
 }
 
+/* ---------------------------------------------------------------- light / dark */
+function setIcon(t) {                // the icon and label offer the OTHER theme
+  const next = t === "dark" ? "light" : "dark";
+  $("theme-toggle").dataset.icon = next === "dark" ? "moon" : "sun";
+  $("theme-label").textContent = next === "dark" ? "Dark mode" : "Light mode";
+}
+function applyTheme(t, remember, icon = true) {
+  document.documentElement.dataset.theme = t;
+  const next = t === "dark" ? "light" : "dark";
+  if (icon) setIcon(t);
+  $("theme-toggle").setAttribute("aria-pressed", String(t === "dark"));
+  $("theme-toggle").setAttribute("aria-label", `Switch to ${next} mode`);
+  if (remember) { try { localStorage.setItem("si-theme", t); } catch (_) { /* storage blocked: theme lasts for this visit */ } }
+  // charts read colours through CSS variables, so a redraw is only needed for the gauge's tick text style
+  if (state.predicted.length) drawGauge(state.predicted[state.predicted.length - 1]);
+}
+function initTheme() {
+  const root = document.documentElement;
+  root.classList.add("icon-instant");                     // no morph on page load
+  applyTheme(root.dataset.theme === "dark" ? "dark" : "light", false);
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("icon-instant")));
+  $("theme-toggle").addEventListener("click", () => switchTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+}
+
+let themeBusy = false;
+const THEME_CANVAS = { light: "#f4f5f7", dark: "#0f1316" };      // must match --canvas in app.css
+const GROW = { duration: 900, easing: "cubic-bezier(0.45, 0, 0.15, 1)" };   // slow start, long soft landing
+const SHRINK = { duration: 780, easing: "cubic-bezier(0.55, 0, 0.25, 1)" };
+
+/* keyframes for a circular mask centred on (x, y): its box is S px square, so the opaque part (84 % of the radius) just
+   covers the farthest corner at full size and the rim stays soft (16 % of the radius) */
+function circleFrames(x, y, far, grow) {
+  const S = Math.ceil((2 * far) / 0.84) + 4;
+  const small = { maskSize: "0px 0px", maskPosition: `${x}px ${y}px`, webkitMaskSize: "0px 0px", webkitMaskPosition: `${x}px ${y}px` };
+  const big = { maskSize: `${S}px ${S}px`, maskPosition: `${x - S / 2}px ${y - S / 2}px`,
+                webkitMaskSize: `${S}px ${S}px`, webkitMaskPosition: `${x - S / 2}px ${y - S / 2}px` };
+  return grow ? [small, big] : [big, small];
+}
+
+async function switchTheme(next) {
+  const root = document.documentElement, btn = $("theme-toggle");
+  if (themeBusy) return;
+  themeBusy = true;
+  const grow = next === "dark";
+  const r = btn.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const far = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  try {
+    if (reduceMotion) {                                   // no movement: a quick, plain fade
+      const veil = document.createElement("div");
+      veil.className = "theme-veil"; veil.style.cssText = `-webkit-mask:none;mask:none;background:${THEME_CANVAS[root.dataset.theme]}`;
+      document.body.appendChild(veil);
+      applyTheme(next, true);
+      await veil.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: "ease-out" }).finished;
+      veil.remove();
+    } else if (document.startViewTransition) {           // reveal the real page through the circle
+      root.dataset.vt = grow ? "expand" : "contract";
+      root.classList.add("icon-instant");               // the snapshot must show the finished icon; its layer animates the change
+      const t = document.startViewTransition(() => applyTheme(next, true));
+      await t.ready;
+      root.animate(circleFrames(x, y, far, grow), { ...(grow ? GROW : SHRINK), fill: "both",
+        pseudoElement: grow ? "::view-transition-new(root)" : "::view-transition-old(root)" });
+      await t.finished;
+    } else {                                              // older browsers: a veil in the other theme's colour
+      const veil = document.createElement("div");
+      veil.className = "theme-veil";
+      veil.style.background = THEME_CANVAS[grow ? "dark" : root.dataset.theme];
+      document.body.appendChild(veil);
+      if (grow) {
+        await veil.animate(circleFrames(x, y, far, true), { ...GROW, fill: "both" }).finished;
+        applyTheme(next, true);
+        await veil.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 260, easing: "ease-out", fill: "both" }).finished;
+      } else {
+        applyTheme(next, true, false);                    // the light page is ready underneath; the dark veil draws away
+        await veil.animate(circleFrames(x, y, far, false), { ...SHRINK, fill: "both" }).finished;
+        setIcon(next);                                    // the button is uncovered last, so its icon morphs now
+      }
+      veil.remove();
+    }
+  } catch (_) {
+    applyTheme(next, true);                               // whatever happens, end on the chosen theme
+  } finally {
+    delete root.dataset.vt;
+    root.classList.remove("icon-instant");
+    themeBusy = false;
+  }
+}
+
 async function init() {
+  initTheme();
+  moveThumb(false);
+  new ResizeObserver(() => moveThumb(false)).observe(document.querySelector(".mode-switch"));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => moveThumb(false));   // tab widths change once Geist loads
   TABS.forEach(([id], i) => {
     $(id).addEventListener("click", () => selectTab(id));
     $(id).addEventListener("keydown", (e) => {

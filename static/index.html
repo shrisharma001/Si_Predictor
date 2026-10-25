@@ -4,21 +4,56 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hot-metal silicon</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&display=swap">
+  <meta name="color-scheme" content="light dark">
+  <link rel="preload" href="/static/fonts/geist-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/app.css">
+  <script>
+    /* set the theme before the page paints, so it never flashes the wrong colours */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("si-theme"); } catch (e) { /* storage blocked */ }
+      if (t !== "light" && t !== "dark") t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
 </head>
 <body>
   <header class="masthead">
     <div class="masthead-inner">
-      <h1>Hot-metal silicon</h1>
-      <p id="model-line" class="model-line">Loading the model…</p>
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="0.5" y="0.5" width="31" height="31" rx="9" fill="none" stroke="currentColor" stroke-opacity="0.16"/>
+          <path d="M9 9.5h14l-2 8.2a5 5 0 0 1-10 0z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M11.4 13h9.2l-1.1 4.5a3.4 3.4 0 0 1-7 0z" fill="var(--copper)"/>
+          <path d="M16 22.6c0 1.6-1.1 2.3-1.1 3.4a1.1 1.1 0 0 0 2.2 0c0-1.1-1.1-1.8-1.1-3.4z" fill="var(--copper)"/>
+        </svg>
+        <div class="brand-text">
+          <h1>Hot-metal silicon</h1>
+          <p id="model-line" class="model-line">Loading the model…</p>
+        </div>
+      </div>
+      <button type="button" id="theme-toggle" class="theme-toggle" aria-pressed="false">
+        <svg class="theme-icon" id="theme-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <mask id="theme-moon-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+            <rect width="24" height="24" fill="#fff"/>
+            <circle class="moon-bite" cx="27" cy="1" r="7" fill="#000"/>
+          </mask>
+          <circle class="sun-core" cx="12" cy="12" r="5" fill="currentColor" mask="url(#theme-moon-mask)"/>
+          <g class="sun-rays" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <line x1="12" y1="1.8" x2="12" y2="3.6"/><line x1="12" y1="20.4" x2="12" y2="22.2"/>
+            <line x1="1.8" y1="12" x2="3.6" y2="12"/><line x1="20.4" y1="12" x2="22.2" y2="12"/>
+            <line x1="4.8" y1="4.8" x2="6.1" y2="6.1"/><line x1="17.9" y1="17.9" x2="19.2" y2="19.2"/>
+            <line x1="4.8" y1="19.2" x2="6.1" y2="17.9"/><line x1="17.9" y1="6.1" x2="19.2" y2="4.8"/>
+          </g>
+        </svg>
+        <span class="toggle-label" id="theme-label">Dark mode</span>
+      </button>
     </div>
   </header>
 
   <main class="page">
     <div class="mode-switch" role="tablist" aria-label="Data source">
+      <span class="tab-thumb" aria-hidden="true"></span>
       <button role="tab" id="tab-replay" aria-selected="true" aria-controls="panel-replay">Replay held-out casts</button>
       <button role="tab" id="tab-files" aria-selected="false" aria-controls="panel-files" tabindex="-1">Predict from my files</button>
       <button role="tab" id="tab-train" aria-selected="false" aria-controls="panel-train" tabindex="-1">Train for another furnace</button>
